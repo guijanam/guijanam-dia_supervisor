@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type { RecordType, SpecialScheduleWithEmployee } from "@/lib/types";
 import { getTodayMonthStr, getDayName } from "@/lib/schedule-utils";
+import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
   Table,
   TableBody,
@@ -17,7 +18,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Loader2, LogOut, Download, Trash2, Save } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Loader2,
+  LogOut,
+  Download,
+  Trash2,
+  Save,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+} from "lucide-react";
 
 interface Row extends SpecialScheduleWithEmployee {
   _draftDate: string;
@@ -33,12 +50,24 @@ export function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // 신규 등록 모달 상태
+  const [addOpen, setAddOpen] = useState(false);
+  const [empList, setEmpList] = useState<
+    Array<{ staff_id: number; staff_name: string; staff_position: string }>
+  >([]);
+  const [empLoading, setEmpLoading] = useState(false);
+  const [addStaffId, setAddStaffId] = useState<string>("");
+  const [addDate, setAddDate] = useState<string>("");
+  const [addType, setAddType] = useState<RecordType>("지근");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     const [year, month] = monthValue.split("-").map(Number);
-    const start = `${year}-${String(month).padStart(2, "0")}-01`;
-    const end = `${year}-${String(month).padStart(2, "0")}-31`;
+    const start = format(startOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
+    const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
 
     try {
       const { data: schedules, error: qErr } = await supabase
@@ -97,13 +126,21 @@ export function AdminDashboard() {
     fetchData();
   }, [fetchData]);
 
+  const shiftMonth = (delta: number) => {
+    const [year, month] = monthValue.split("-").map(Number);
+    const d = new Date(year, month - 1 + delta);
+    setMonthValue(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+    );
+  };
+
   const filtered = useMemo(() => {
     const f = nameFilter.trim().toLowerCase();
     if (!f) return rows;
     return rows.filter(
       (r) =>
         r.employee?.staff_name?.toLowerCase().includes(f) ||
-        r.employee?.employee_number?.includes(f)
+        String(r.employee?.employee_number ?? "").toLowerCase().includes(f)
     );
   }, [rows, nameFilter]);
 
@@ -147,6 +184,68 @@ export function AdminDashboard() {
       setError(err instanceof Error ? err.message : "삭제 실패");
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const openAddModal = async () => {
+    setAddError(null);
+    setAddStaffId("");
+    setAddType("지근");
+    setAddDate(`${monthValue}-01`);
+    setAddOpen(true);
+    if (empList.length === 0) {
+      setEmpLoading(true);
+      try {
+        const { data, error: eErr } = await supabase
+          .from("coworker_list")
+          .select("staff_id, staff_name, staff_position")
+          .order("staff_name", { ascending: true });
+        if (eErr) throw eErr;
+        setEmpList(
+          (data ?? []) as Array<{
+            staff_id: number;
+            staff_name: string;
+            staff_position: string;
+          }>
+        );
+      } catch (err) {
+        setAddError(
+          err instanceof Error ? err.message : "직원 목록 로딩 실패"
+        );
+      } finally {
+        setEmpLoading(false);
+      }
+    }
+  };
+
+  const submitAdd = async () => {
+    if (!addStaffId || !addDate) {
+      setAddError("직원과 날짜를 선택하세요.");
+      return;
+    }
+    setAddBusy(true);
+    setAddError(null);
+    try {
+      const { error: upErr } = await supabase
+        .from("special_schedules")
+        .upsert(
+          {
+            staff_id: Number(addStaffId),
+            target_date: addDate,
+            record_type: addType,
+          },
+          { onConflict: "staff_id,target_date" }
+        );
+      if (upErr) throw upErr;
+      setAddOpen(false);
+      // 등록한 날짜가 현재 조회 월이면 목록 새로고침
+      if (addDate.slice(0, 7) === monthValue) {
+        await fetchData();
+      }
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : "등록 실패");
+    } finally {
+      setAddBusy(false);
     }
   };
 
@@ -198,12 +297,30 @@ export function AdminDashboard() {
       </header>
 
       <div className="flex items-center gap-2 p-3 flex-wrap">
-        <Input
-          type="month"
-          value={monthValue}
-          onChange={(e) => setMonthValue(e.target.value)}
-          className="w-auto"
-        />
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => shiftMonth(-1)}
+            title="이전 달"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Input
+            type="month"
+            value={monthValue}
+            onChange={(e) => setMonthValue(e.target.value)}
+            className="w-auto"
+          />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => shiftMonth(1)}
+            title="다음 달"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
         <Input
           type="text"
           placeholder="이름/사번 검색"
@@ -213,6 +330,9 @@ export function AdminDashboard() {
         />
         <Button size="sm" onClick={fetchData} disabled={isLoading}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "조회"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={openAddModal}>
+          <Plus className="h-4 w-4" /> 신규 등록
         </Button>
         <Button
           size="sm"
@@ -341,6 +461,80 @@ export function AdminDashboard() {
           </Table>
         </div>
       </div>
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>지근/지휴 신규 등록</DialogTitle>
+            <DialogDescription>
+              직원과 날짜, 구분을 선택해 등록합니다. 같은 직원·날짜에 기존
+              신청이 있으면 구분이 덮어쓰기 됩니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          {addError && (
+            <p className="text-destructive text-sm font-medium">{addError}</p>
+          )}
+
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">직원</span>
+              <select
+                value={addStaffId}
+                disabled={empLoading || addBusy}
+                onChange={(e) => setAddStaffId(e.target.value)}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              >
+                <option value="">
+                  {empLoading ? "직원 목록 로딩 중..." : "직원 선택"}
+                </option>
+                {empList.map((emp) => (
+                  <option key={emp.staff_id} value={emp.staff_id}>
+                    {emp.staff_name}
+                    {emp.staff_position ? ` (${emp.staff_position})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">날짜</span>
+              <Input
+                type="date"
+                value={addDate}
+                disabled={addBusy}
+                onChange={(e) => setAddDate(e.target.value)}
+                className="h-9"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">구분</span>
+              <select
+                value={addType}
+                disabled={addBusy}
+                onChange={(e) => setAddType(e.target.value as RecordType)}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              >
+                <option value="지근">지근</option>
+                <option value="지휴">지휴</option>
+              </select>
+            </label>
+
+            <Button
+              onClick={submitAdd}
+              disabled={addBusy || empLoading}
+              className="w-full"
+            >
+              {addBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "등록"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

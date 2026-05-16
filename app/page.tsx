@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { LoginForm } from "@/components/login-form";
 import { UserCalendar } from "@/components/user-calendar";
 import { AdminDashboard } from "@/components/admin-dashboard";
+import { AdminCalendar } from "@/components/admin-calendar";
 import { cn } from "@/lib/utils";
 
 type AdminView = "calendar" | "dashboard";
@@ -29,7 +30,7 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-dvh">
       <div className="flex-1 pb-14">
-        {adminView === "dashboard" ? <AdminDashboard /> : <UserCalendar />}
+        {adminView === "dashboard" ? <AdminDashboard /> : <AdminCalendar />}
       </div>
       <nav className="fixed bottom-0 left-0 w-full z-50 flex border-t bg-background">
         {(

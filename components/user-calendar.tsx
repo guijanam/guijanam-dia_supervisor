@@ -154,7 +154,7 @@ export function UserCalendar() {
             <div
               key={wd}
               className={cn(
-                "text-center text-xs font-bold py-1",
+                "text-center text-sm font-bold py-1",
                 i === 0 && "text-red-500",
                 i === 6 && "text-blue-500"
               )}
@@ -171,27 +171,29 @@ export function UserCalendar() {
                 key={date}
                 onClick={() => setSelectedDate(date)}
                 className={cn(
-                  "min-h-[64px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col",
-                  !inMonth && "opacity-35"
+                  "min-h-[76px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col",
+                  !inMonth && "opacity-35",
+                  turn?.includes("휴") &&
+                    "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800"
                 )}
               >
                 <span
                   className={cn(
-                    "text-xs font-semibold",
+                    "text-sm font-semibold",
                     getDayColorClass(date, holidays)
                   )}
                 >
                   {Number(date.slice(8, 10))}
                 </span>
                 {turn && (
-                  <span className="text-[10px] text-muted-foreground mt-auto truncate">
+                  <span className="text-sm font-semibold mt-auto truncate text-foreground">
                     {turn}
                   </span>
                 )}
                 {special && (
                   <span
                     className={cn(
-                      "text-[10px] font-bold rounded px-1 mt-0.5 text-center",
+                      "text-xs font-bold rounded px-1 mt-0.5 text-center",
                       special.record_type === "지근"
                         ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
                         : "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
