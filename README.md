@@ -1,4 +1,22 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+근무 순서 관리 시스템 — 개별 로그인, 지근/지휴 신청, 관리자 통합 관리 기능 포함.
+
+## 셋업
+
+1. 의존성 설치: `npm install`
+2. 환경변수: `.env.example` 를 `.env.local` 로 복사 후 Supabase 값 입력
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+3. DB: `supabase/migrations.sql` 을 Supabase SQL Editor 에서 실행
+   - 기존 `coworker_list`(직원 마스터) 에 `role` 컬럼 추가
+   - `special_schedules` 테이블 + RLS 생성 (`staff_id` 로 연결)
+   - `coworker_list.employee_number` 가 비어 있으면 사번 데이터 입력
+4. 관리자 지정: `update coworker_list set role='admin' where staff_name='홍길동';`
+
+## 기능
+
+- **로그인**: 이름 + 사번(`employee_number`) → `coworker_list` 조회 (localStorage 세션)
+- **일반 직원**: 월간 캘린더에서 본인 정규 근무(`staff_id` 매칭) + 지근/지휴 확인, 날짜 클릭 시 신청/삭제
+- **관리자**: 전체 지근/지휴 통합 조회·편집·삭제, 월·이름 필터, Excel(xlsx) 다운로드
+- 관리자 접근은 `role='admin'` 게이트로 제어 (RLS + anon)
 
 ## Getting Started
 

@@ -1,4 +1,4 @@
-import { eachDayOfInterval, format, getDay, parse, startOfMonth, endOfMonth, addDays } from "date-fns";
+import { eachDayOfInterval, format, getDay, parse, startOfMonth, endOfMonth, addDays, startOfWeek, endOfWeek } from "date-fns";
 import type { ScheduleRecord } from "./types";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
@@ -75,6 +75,22 @@ export function computeInitialRange(): { start: string; end: string } {
     start: format(today, "yyyy-MM-dd"),
     end: format(end, "yyyy-MM-dd"),
   };
+}
+
+// 월간 달력용: 해당 월을 포함하는 주(일~토) 단위 날짜 그리드
+export function getCalendarGrid(monthValue: string): string[] {
+  const [year, month] = monthValue.split("-").map(Number);
+  const firstOfMonth = startOfMonth(new Date(year, month - 1));
+  const lastOfMonth = endOfMonth(new Date(year, month - 1));
+  const gridStart = startOfWeek(firstOfMonth, { weekStartsOn: 0 });
+  const gridEnd = endOfWeek(lastOfMonth, { weekStartsOn: 0 });
+  return eachDayOfInterval({ start: gridStart, end: gridEnd }).map((d) =>
+    format(d, "yyyy-MM-dd")
+  );
+}
+
+export function isSameMonth(dateString: string, monthValue: string): boolean {
+  return dateString.slice(0, 7) === monthValue;
 }
 
 export function buildScheduleMap(
