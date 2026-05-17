@@ -54,8 +54,13 @@ export function LoginForm() {
   return (
     <div className="flex items-center justify-center min-h-dvh px-6">
       <div className="w-full max-w-xs space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold">근무표 로그인</h1>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-bold">근무표 로그인</h1>
+            <p className="text-sm text-muted-foreground">
+              지근/지휴 관리시스템
+            </p>
+          </div>
           <ThemeToggle />
         </div>
         <form onSubmit={handleSubmit} className="space-y-3">
