@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
-import type { RecordType } from "@/lib/types";
+import type { RecordType, ScheduleRecord } from "@/lib/types";
 import {
   getTodayMonthStr,
   getCalendarGrid,
@@ -34,9 +34,11 @@ const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 interface SpecialEntry {
   id: string;
+  staff_id: number;
   staff_name: string;
   staff_position: string;
   record_type: RecordType;
+  regularTurn: string | null;
 }
 
 export function AdminCalendar() {
@@ -62,7 +64,7 @@ export function AdminCalendar() {
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
 
     try {
-      const [specialResult, holidayResult] = await Promise.all([
+      const [specialResult, holidayResult, scheduleResult] = await Promise.all([
         supabase
           .from("special_schedules")
           .select("id, staff_id, target_date, record_type")
@@ -75,9 +77,25 @@ export function AdminCalendar() {
           .eq("is_holiday", "Y")
           .gte("locdate", start)
           .lte("locdate", end),
+        supabase
+          .rpc("get_schedule_by_range", {
+            p_start_date: start,
+            p_end_date: end,
+          })
+          .range(0, 10000),
       ]);
 
       if (specialResult.error) throw specialResult.error;
+      if (scheduleResult.error) throw scheduleResult.error;
+
+      // (staff_id, 날짜) → 원래 근무(turn) 매핑
+      const regularMap = new Map<string, string>();
+      for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+        const dateStr = row.date
+          ? format(new Date(row.date), "yyyy-MM-dd")
+          : "";
+        if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
+      }
 
       const list = (specialResult.data ?? []) as Array<{
         id: string;
@@ -111,9 +129,12 @@ export function AdminCalendar() {
         const emp = empMap.get(row.staff_id);
         const entry: SpecialEntry = {
           id: row.id,
+          staff_id: row.staff_id,
           staff_name: emp?.staff_name ?? `(미상 ${row.staff_id})`,
           staff_position: emp?.staff_position ?? "",
           record_type: row.record_type,
+          regularTurn:
+            regularMap.get(`${row.staff_id}|${row.target_date}`) ?? null,
         };
         const arr = sMap.get(row.target_date);
         if (arr) arr.push(entry);
@@ -324,6 +345,10 @@ export function AdminCalendar() {
                         ({e.staff_position})
                       </span>
                     )}
+                    <span className="text-muted-foreground">
+                      {" · "}원래 근무:{" "}
+                    </span>
+                    <span className="font-medium">{e.regularTurn ?? "-"}</span>
                   </span>
                   <div className="flex items-center gap-1 shrink-0">
                     <select

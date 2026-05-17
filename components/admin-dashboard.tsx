@@ -4,7 +4,11 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
-import type { RecordType, SpecialScheduleWithEmployee } from "@/lib/types";
+import type {
+  RecordType,
+  ScheduleRecord,
+  SpecialScheduleWithEmployee,
+} from "@/lib/types";
 import { getTodayMonthStr, getDayName } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
@@ -39,6 +43,7 @@ import {
 interface Row extends SpecialScheduleWithEmployee {
   _draftDate: string;
   _draftType: RecordType;
+  regularTurn: string | null;
 }
 
 export function AdminDashboard() {
@@ -70,14 +75,33 @@ export function AdminDashboard() {
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
 
     try {
-      const { data: schedules, error: qErr } = await supabase
-        .from("special_schedules")
-        .select("id, staff_id, target_date, record_type, created_at")
-        .gte("target_date", start)
-        .lte("target_date", end)
-        .order("target_date", { ascending: true });
+      const [{ data: schedules, error: qErr }, scheduleResult] =
+        await Promise.all([
+          supabase
+            .from("special_schedules")
+            .select("id, staff_id, target_date, record_type, created_at")
+            .gte("target_date", start)
+            .lte("target_date", end)
+            .order("target_date", { ascending: true }),
+          supabase
+            .rpc("get_schedule_by_range", {
+              p_start_date: start,
+              p_end_date: end,
+            })
+            .range(0, 10000),
+        ]);
 
       if (qErr) throw qErr;
+      if (scheduleResult.error) throw scheduleResult.error;
+
+      // (staff_id, 날짜) → 원래 근무(turn) 매핑
+      const regularMap = new Map<string, string>();
+      for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+        const dateStr = row.date
+          ? format(new Date(row.date), "yyyy-MM-dd")
+          : "";
+        if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
+      }
 
       const list = (schedules ?? []) as Array<{
         id: string;
@@ -113,6 +137,7 @@ export function AdminDashboard() {
         employee: empMap.get(s.staff_id) ?? null,
         _draftDate: s.target_date,
         _draftType: s.record_type,
+        regularTurn: regularMap.get(`${s.staff_id}|${s.target_date}`) ?? null,
       }));
       setRows(mapped);
     } catch (err) {
@@ -251,11 +276,12 @@ export function AdminDashboard() {
 
   const exportExcel = () => {
     const sheetData = filtered.map((r) => ({
-      이름: r.employee?.staff_name ?? "",
       사번: r.employee?.employee_number ?? "",
       직책: r.employee?.staff_position ?? "",
+      이름: r.employee?.staff_name ?? "",
       날짜: r.target_date,
       요일: getDayName(r.target_date),
+      "원래 근무": r.regularTurn ?? "",
       구분: r.record_type,
       신청일시: r.created_at
         ? new Date(r.created_at).toLocaleString("ko-KR")
@@ -358,10 +384,11 @@ export function AdminDashboard() {
           <Table className="min-w-max">
             <TableHeader>
               <TableRow>
-                <TableHead className="text-center">이름</TableHead>
                 <TableHead className="text-center">사번</TableHead>
                 <TableHead className="text-center">직책</TableHead>
+                <TableHead className="text-center">이름</TableHead>
                 <TableHead className="text-center">날짜</TableHead>
+                <TableHead className="text-center">원래 근무</TableHead>
                 <TableHead className="text-center">구분</TableHead>
                 <TableHead className="text-center">작업</TableHead>
               </TableRow>
@@ -370,7 +397,7 @@ export function AdminDashboard() {
               {!isLoading && filtered.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-center text-muted-foreground py-8"
                   >
                     데이터가 없습니다.
@@ -380,13 +407,13 @@ export function AdminDashboard() {
               {filtered.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="text-center text-sm whitespace-nowrap">
-                    {row.employee?.staff_name}
-                  </TableCell>
-                  <TableCell className="text-center text-sm whitespace-nowrap">
                     {row.employee?.employee_number}
                   </TableCell>
                   <TableCell className="text-center text-sm whitespace-nowrap">
                     {row.employee?.staff_position}
+                  </TableCell>
+                  <TableCell className="text-center text-sm whitespace-nowrap">
+                    {row.employee?.staff_name}
                   </TableCell>
                   <TableCell className="text-center">
                     <Input
@@ -403,6 +430,9 @@ export function AdminDashboard() {
                       }
                       className="w-36 h-8"
                     />
+                  </TableCell>
+                  <TableCell className="text-center text-sm whitespace-nowrap">
+                    {row.regularTurn ?? "-"}
                   </TableCell>
                   <TableCell className="text-center">
                     <select
