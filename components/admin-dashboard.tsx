@@ -9,7 +9,8 @@ import type {
   ScheduleRecord,
   SpecialScheduleWithEmployee,
 } from "@/lib/types";
-import { getTodayMonthStr, getDayName } from "@/lib/schedule-utils";
+import { getTodayMonthStr, getDayName, getTurnColorClass } from "@/lib/schedule-utils";
+import { cn } from "@/lib/utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
   Table,
@@ -431,7 +432,14 @@ export function AdminDashboard() {
                       className="w-36 h-8"
                     />
                   </TableCell>
-                  <TableCell className="text-center text-sm whitespace-nowrap">
+                  <TableCell
+                    className={cn(
+                      "text-center text-sm whitespace-nowrap",
+                      row.regularTurn
+                        ? getTurnColorClass(row.regularTurn, row.target_date)
+                        : ""
+                    )}
+                  >
                     {row.regularTurn ?? "-"}
                   </TableCell>
                   <TableCell className="text-center">

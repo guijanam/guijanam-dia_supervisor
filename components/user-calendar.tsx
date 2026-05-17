@@ -9,6 +9,7 @@ import {
   getCalendarGrid,
   isSameMonth,
   getDayColorClass,
+  getTurnColorClass,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -173,7 +174,8 @@ export function UserCalendar() {
                 className={cn(
                   "min-h-[76px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col",
                   !inMonth && "opacity-35",
-                  turn?.includes("휴") &&
+                  turn &&
+                    getTurnColorClass(turn, date, holidays).includes("bg-red") &&
                     "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800"
                 )}
               >
