@@ -13,12 +13,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { getDayName } from "@/lib/schedule-utils";
+import { cn } from "@/lib/utils";
+import type { DayEntry } from "@/components/user-calendar";
 
 interface DayModalProps {
   employee: Employee;
   date: string | null;
   regularTurn: string | null;
   existing: SpecialSchedule | null;
+  allEntries: DayEntry[];
   onClose: () => void;
   onChanged: () => void;
 }
@@ -28,6 +31,7 @@ export function DayModal({
   date,
   regularTurn,
   existing,
+  allEntries,
   onClose,
   onChanged,
 }: DayModalProps) {
@@ -102,6 +106,83 @@ export function DayModal({
         {error && (
           <p className="text-destructive text-sm font-medium">{error}</p>
         )}
+
+        <div className="rounded-md border">
+          <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
+            <span className="text-sm font-semibold">전체 신청 내역</span>
+            <span className="text-xs text-muted-foreground">
+              지근 {allEntries.filter((e) => e.record_type === "지근").length}
+              {" · "}
+              지휴 {allEntries.filter((e) => e.record_type === "지휴").length}
+              {" · "}총 {allEntries.length}건
+            </span>
+          </div>
+          {allEntries.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              신청 내역이 없습니다.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 divide-x max-h-[40vh] overflow-auto">
+              {(["기관사", "차장"] as const).map((pos) => {
+                const group = allEntries.filter(
+                  (e) => e.staff_position === pos
+                );
+                return (
+                  <div key={pos} className="flex flex-col min-w-0">
+                    <div className="px-3 py-1.5 text-xs font-semibold text-center bg-muted/30 sticky top-0">
+                      {pos} ({group.length})
+                    </div>
+                    {group.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-3 text-center">
+                        없음
+                      </p>
+                    ) : (
+                      <div className="flex flex-col divide-y">
+                        {group.map((e) => (
+                          <div
+                            key={e.id}
+                            className={cn(
+                              "flex items-center justify-between gap-1.5 px-2 py-2 text-sm",
+                              e.staff_id === employee.staff_id && "bg-accent"
+                            )}
+                          >
+                            <span className="min-w-0 truncate">
+                              <span className="font-semibold">
+                                {e.staff_name}
+                              </span>
+                              {e.staff_id === employee.staff_id && (
+                                <span className="text-primary font-medium">
+                                  {" "}
+                                  · 본인
+                                </span>
+                              )}
+                              <span className="text-muted-foreground">
+                                {" · "}근무:{" "}
+                              </span>
+                              <span className="font-medium">
+                                {e.regularTurn ?? "-"}
+                              </span>
+                            </span>
+                            <span
+                              className={cn(
+                                "shrink-0 text-xs font-bold rounded px-1.5 py-0.5",
+                                e.record_type === "지근"
+                                  ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                                  : "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
+                              )}
+                            >
+                              {e.record_type}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <Button

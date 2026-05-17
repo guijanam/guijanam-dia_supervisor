@@ -56,6 +56,10 @@ export function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // 전체 삭제 확인 모달 상태
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deleteAllBusy, setDeleteAllBusy] = useState(false);
+
   // 신규 등록 모달 상태
   const [addOpen, setAddOpen] = useState(false);
   const [empList, setEmpList] = useState<
@@ -303,6 +307,38 @@ export function AdminDashboard() {
     XLSX.writeFile(wb, `지근지휴_${monthValue}.xlsx`);
   };
 
+  const openDeleteAll = () => {
+    if (
+      !confirm(
+        `[경고] ${monthValue} 월의 모든 신청 내역을 삭제합니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`
+      )
+    )
+      return;
+    setDeleteAllOpen(true);
+  };
+
+  const confirmDeleteAll = async () => {
+    setDeleteAllBusy(true);
+    setError(null);
+    const [year, month] = monthValue.split("-").map(Number);
+    const start = format(startOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
+    const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
+    try {
+      const { error: delErr } = await supabase
+        .from("special_schedules")
+        .delete()
+        .gte("target_date", start)
+        .lte("target_date", end);
+      if (delErr) throw delErr;
+      setDeleteAllOpen(false);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "전체 삭제 실패");
+    } finally {
+      setDeleteAllBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-dvh">
       <header className="flex items-center justify-between p-3 border-b">
@@ -368,6 +404,14 @@ export function AdminDashboard() {
           disabled={filtered.length === 0}
         >
           <Download className="h-4 w-4" /> Excel 다운로드
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={openDeleteAll}
+          disabled={rows.length === 0 || isLoading}
+        >
+          <Trash2 className="h-4 w-4" /> 전체 삭제
         </Button>
         <span className="text-sm text-muted-foreground ml-auto">
           총 {filtered.length}건
@@ -568,6 +612,51 @@ export function AdminDashboard() {
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 "등록"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteAllOpen}
+        onOpenChange={(open) => !deleteAllBusy && setDeleteAllOpen(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">
+              전체 삭제 최종 확인
+            </DialogTitle>
+            <DialogDescription>
+              <span className="font-semibold text-foreground">
+                {monthValue}
+              </span>{" "}
+              월의 신청 내역{" "}
+              <span className="font-semibold text-foreground">
+                {rows.length}건
+              </span>
+              이 모두 삭제됩니다. 이 작업은 되돌릴 수 없습니다. 정말
+              삭제하시겠습니까?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              disabled={deleteAllBusy}
+              onClick={() => setDeleteAllOpen(false)}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteAllBusy}
+              onClick={confirmDeleteAll}
+            >
+              {deleteAllBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "전체 삭제"
               )}
             </Button>
           </div>

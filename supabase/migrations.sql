@@ -77,3 +77,14 @@ create policy special_schedules_delete on public.special_schedules for delete us
 -- pattern_name, date, turn, phone_number 를 반환합니다.
 -- staff_id 로 본인 근무를 필터링하므로 RPC 변경은 필요 없습니다.
 -- ============================================================
+
+-- ============================================================
+-- 4) employee_number(사번) 데이터 형식 변경: int4 -> text -----
+--  - 사번은 식별자이므로 앞자리 0 보존·형식 유연성을 위해 text 권장.
+--  - staff_id(내부 PK/FK)는 그대로 integer 유지해야 함 (조인/인덱스/RPC).
+--  - 현재 employee_number 가 전부 NULL 이면 데이터 손실 없이 변환됩니다.
+--  - 일부 값이 있어도 ::text 캐스팅으로 안전하게 문자열 변환됩니다.
+-- ============================================================
+alter table public.coworker_list
+  alter column employee_number type text
+  using employee_number::text;

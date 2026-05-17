@@ -269,12 +269,6 @@ export function AdminCalendar() {
           {grid.map((date) => {
             const inMonth = isSameMonth(date, monthValue);
             const entries = specialMap.get(date) ?? [];
-            const geunCount = entries.filter(
-              (e) => e.record_type === "지근"
-            ).length;
-            const hyuCount = entries.filter(
-              (e) => e.record_type === "지휴"
-            ).length;
             return (
               <button
                 key={date}
@@ -292,16 +286,22 @@ export function AdminCalendar() {
                 >
                   {Number(date.slice(8, 10))}
                 </span>
-                {geunCount > 0 && (
-                  <span className="text-[10px] font-bold rounded px-1 text-center bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300">
-                    지근 {geunCount}
+                {entries.map((e) => (
+                  <span
+                    key={e.id}
+                    title={`${e.staff_name} (${e.staff_position}) ${e.record_type}`}
+                    className={cn(
+                      "text-[10px] font-bold rounded px-1 truncate",
+                      e.record_type === "지휴"
+                        ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
+                        : e.staff_position === "차장"
+                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                          : "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                    )}
+                  >
+                    {e.staff_name}
                   </span>
-                )}
-                {hyuCount > 0 && (
-                  <span className="text-[10px] font-bold rounded px-1 text-center bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
-                    지휴 {hyuCount}
-                  </span>
-                )}
+                ))}
               </button>
             );
           })}
@@ -331,53 +331,69 @@ export function AdminCalendar() {
               신청 내역이 없습니다.
             </p>
           ) : (
-            <div className="flex flex-col gap-1 max-h-[60vh] overflow-auto">
-              {selectedEntries.map((e) => (
-                <div
-                  key={e.id}
-                  className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
-                >
-                  <span className="min-w-0 truncate">
-                    <span className="font-semibold">{e.staff_name}</span>
-                    {e.staff_position && (
-                      <span className="text-muted-foreground">
-                        {" "}
-                        ({e.staff_position})
-                      </span>
+            <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-auto">
+              {(["기관사", "차장"] as const).map((pos) => {
+                const group = selectedEntries.filter(
+                  (e) => e.staff_position === pos
+                );
+                return (
+                  <div key={pos} className="flex flex-col gap-1 min-w-0">
+                    <div className="px-2 py-1.5 text-xs font-semibold text-center bg-muted/40 rounded-md sticky top-0">
+                      {pos} ({group.length})
+                    </div>
+                    {group.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-3 text-center">
+                        없음
+                      </p>
+                    ) : (
+                      group.map((e) => (
+                        <div
+                          key={e.id}
+                          className="flex flex-col gap-1.5 rounded-md border px-2 py-2 text-sm"
+                        >
+                          <span className="min-w-0 truncate">
+                            <span className="font-semibold">
+                              {e.staff_name}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {" · "}근무:{" "}
+                            </span>
+                            <span className="font-medium">
+                              {e.regularTurn ?? "-"}
+                            </span>
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <select
+                              value={e.record_type}
+                              disabled={busyId === e.id}
+                              onChange={(ev) =>
+                                changeType(e.id, ev.target.value as RecordType)
+                              }
+                              className="h-8 flex-1 rounded-md border bg-background px-2 text-xs"
+                            >
+                              <option value="지근">지근</option>
+                              <option value="지휴">지휴</option>
+                            </select>
+                            <Button
+                              size="icon-sm"
+                              variant="destructive"
+                              disabled={busyId === e.id}
+                              onClick={() => deleteEntry(e)}
+                              title="삭제"
+                            >
+                              {busyId === e.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      ))
                     )}
-                    <span className="text-muted-foreground">
-                      {" · "}원래 근무:{" "}
-                    </span>
-                    <span className="font-medium">{e.regularTurn ?? "-"}</span>
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <select
-                      value={e.record_type}
-                      disabled={busyId === e.id}
-                      onChange={(ev) =>
-                        changeType(e.id, ev.target.value as RecordType)
-                      }
-                      className="h-8 rounded-md border bg-background px-2 text-xs"
-                    >
-                      <option value="지근">지근</option>
-                      <option value="지휴">지휴</option>
-                    </select>
-                    <Button
-                      size="icon-sm"
-                      variant="destructive"
-                      disabled={busyId === e.id}
-                      onClick={() => deleteEntry(e)}
-                      title="삭제"
-                    >
-                      {busyId === e.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </DialogContent>
