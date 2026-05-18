@@ -2,7 +2,7 @@ import { eachDayOfInterval, format, getDay, parse, startOfMonth, endOfMonth, add
 import type { ScheduleRecord } from "./types";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
-const WEEKEND_HOLIDAY_TURNS = ["31", "32", "33", "34", "35", "36", "37"];
+export const WEEKEND_HOLIDAY_TURNS = ["31", "32", "33", "34", "35", "36", "37"];
 
 export function getTodayDateStr(): string {
   return format(new Date(), "yyyy-MM-dd");

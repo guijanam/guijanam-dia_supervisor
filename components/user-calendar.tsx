@@ -10,6 +10,8 @@ import {
   isSameMonth,
   getDayColorClass,
   getTurnColorClass,
+  getDayName,
+  WEEKEND_HOLIDAY_TURNS,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -45,6 +47,29 @@ export function UserCalendar() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
+
+  const monthStats = useMemo(() => {
+    let hueCount = 0;
+    let weekendTurnCount = 0;
+    for (const [date, turn] of regularMap) {
+      if (!isSameMonth(date, monthValue)) continue;
+      if (turn.includes("휴")) hueCount++;
+      const dayName = getDayName(date);
+      const isHoliday =
+        dayName === "토" || dayName === "일" || holidays.has(date);
+      if (isHoliday && WEEKEND_HOLIDAY_TURNS.includes(turn)) weekendTurnCount++;
+    }
+
+    let jigeunCount = 0;
+    let jihyuCount = 0;
+    for (const [date, sp] of specialMap) {
+      if (!isSameMonth(date, monthValue)) continue;
+      if (sp.record_type === "지근") jigeunCount++;
+      else if (sp.record_type === "지휴") jihyuCount++;
+    }
+
+    return { hueCount, weekendTurnCount, jigeunCount, jihyuCount };
+  }, [regularMap, specialMap, holidays, monthValue]);
 
   const fetchData = useCallback(async () => {
     if (!employee) return;
@@ -200,10 +225,25 @@ export function UserCalendar() {
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(-1)}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <span className="font-bold text-lg tabular-nums">{monthValue}</span>
+        <span className="font-bold text-xl tabular-nums">{monthValue}</span>
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(1)}>
           <ChevronRight className="h-4 w-4" />
         </Button>
+      </div>
+
+      <div className="flex items-center justify-center gap-2 flex-wrap pb-2 text-base font-bold">
+        <span className="rounded px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
+          휴무 {monthStats.hueCount}
+        </span>
+        <span className="rounded px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
+          운휴 {monthStats.weekendTurnCount}
+        </span>
+        <span className="rounded px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300">
+          지근 {monthStats.jigeunCount}
+        </span>
+        <span className="rounded px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
+          지휴 {monthStats.jihyuCount}
+        </span>
       </div>
 
       {error && (
@@ -250,14 +290,14 @@ export function UserCalendar() {
               >
                 <span
                   className={cn(
-                    "text-sm font-semibold",
+                    "text-base font-semibold",
                     getDayColorClass(date, holidays)
                   )}
                 >
                   {Number(date.slice(8, 10))}
                 </span>
                 {turn && (
-                  <span className="text-sm font-semibold truncate text-foreground">
+                  <span className="text-base font-semibold truncate text-foreground">
                     {turn}
                   </span>
                 )}
@@ -267,7 +307,7 @@ export function UserCalendar() {
                       key={e.id}
                       title={`${e.staff_name} (${e.staff_position}) ${e.record_type}`}
                       className={cn(
-                        "text-[10px] font-bold rounded px-1 truncate",
+                        "text-xs font-bold rounded px-1 truncate",
                         e.record_type === "지휴"
                           ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
                           : e.staff_position === "차장"
