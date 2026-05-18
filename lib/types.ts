@@ -39,3 +39,13 @@ export interface SpecialScheduleWithEmployee extends SpecialSchedule {
     "staff_name" | "employee_number" | "staff_position"
   > | null;
 }
+
+// 공지사항: 관리자가 작성, 일반 직원은 읽기 전용
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+}

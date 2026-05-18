@@ -88,3 +88,32 @@ create policy special_schedules_delete on public.special_schedules for delete us
 alter table public.coworker_list
   alter column employee_number type text
   using employee_number::text;
+
+-- ============================================================
+-- 6) 공지사항(announcements) 테이블 -------------------------
+--  - special_schedules 와 동일한 RLS 패턴(anon-permissive) 적용.
+--  - created_by 는 coworker_list.staff_id(작성 관리자) 참조.
+--  - updated_at 은 클라이언트에서 명시 갱신(무-트리거 스타일).
+-- ============================================================
+create table if not exists public.announcements (
+  id          uuid primary key default gen_random_uuid(),
+  title       text not null,
+  content     text not null,
+  created_by  integer not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index if not exists announcements_created_at_idx
+  on public.announcements (created_at desc);
+
+alter table public.announcements enable row level security;
+
+drop policy if exists announcements_read   on public.announcements;
+drop policy if exists announcements_insert on public.announcements;
+drop policy if exists announcements_update on public.announcements;
+drop policy if exists announcements_delete on public.announcements;
+create policy announcements_read   on public.announcements for select using (true);
+create policy announcements_insert on public.announcements for insert with check (true);
+create policy announcements_update on public.announcements for update using (true) with check (true);
+create policy announcements_delete on public.announcements for delete using (true);

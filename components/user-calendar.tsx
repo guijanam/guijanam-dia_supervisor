@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Loader2, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { DayModal } from "@/components/day-modal";
+import { AnnouncementBoard } from "@/components/announcement-board";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -221,6 +222,8 @@ export function UserCalendar() {
         </div>
       </header>
 
+      <AnnouncementBoard />
+
       <div className="flex items-center justify-center gap-4 py-3">
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(-1)}>
           <ChevronLeft className="h-4 w-4" />
@@ -307,7 +310,7 @@ export function UserCalendar() {
                       key={e.id}
                       title={`${e.staff_name} (${e.staff_position}) ${e.record_type}`}
                       className={cn(
-                        "text-xs font-bold rounded px-1 truncate",
+                        "text-[10px] font-bold rounded px-1 truncate",
                         e.record_type === "지휴"
                           ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
                           : e.staff_position === "차장"

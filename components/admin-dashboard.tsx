@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AnnouncementAdmin } from "@/components/announcement-admin";
 import {
   Dialog,
   DialogContent,
@@ -342,9 +343,12 @@ export function AdminDashboard() {
   return (
     <div className="flex flex-col min-h-dvh">
       <header className="flex items-center justify-between p-3 border-b">
-        <div className="text-sm">
-          <span className="font-bold">{employee?.staff_name}</span>
-          <span className="text-muted-foreground"> · 관리자</span>
+        <div className="flex items-center gap-2">
+          <div className="text-sm">
+            <span className="font-bold">{employee?.staff_name}</span>
+            <span className="text-muted-foreground"> · 관리자</span>
+          </div>
+          <AnnouncementAdmin />
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
