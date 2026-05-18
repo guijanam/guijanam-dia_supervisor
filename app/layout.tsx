@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "월간 근무표",
-  description: "월간 근무표 조회 시스템",
+  title: "지근/지휴 관리시스템",
+  description: "지휴/지근 관리 시스템",
 };
 
 export default function RootLayout({

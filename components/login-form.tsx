@@ -7,7 +7,7 @@ import type { Employee } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Loader2 } from "lucide-react";
+import { Loader2, Phone, MessageSquare } from "lucide-react";
 
 export function LoginForm() {
   const { login } = useAuth();
@@ -54,16 +54,14 @@ export function LoginForm() {
   return (
     <div className="flex items-center justify-center min-h-dvh px-6">
       <div className="w-full max-w-xs space-y-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-xl font-bold">근무표 로그인</h1>
-            <p className="text-sm text-muted-foreground">
-              지근/지휴 관리시스템
-            </p>
-          </div>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold">지근/지휴 관리시스템</h1>
           <ThemeToggle />
         </div>
         <form onSubmit={handleSubmit} className="space-y-3">
+          <p className="text-sm font-medium text-center">
+            최종 지근/지휴 확정은 담당부장(관리자) 입니다.
+          </p>
           <Input
             type="text"
             placeholder="이름"
@@ -90,6 +88,29 @@ export function LoginForm() {
             )}
           </Button>
         </form>
+
+        <div className="mt-6 space-y-3 text-center">
+          <p className="text-muted-foreground text-sm">
+            사번과 근무순서가 틀리면 언제든지 연락주세요.
+          </p>
+          <p className="text-muted-foreground text-xs">
+            시스템개발자 -손희범-
+          </p>
+          <div className="flex flex-col gap-2">
+            <Button asChild variant="outline" className="w-full">
+              <a href="tel:01084176637">
+                <Phone className="mr-2 h-4 w-4" />
+                개발자에게 전화하기
+              </a>
+            </Button>
+            <Button asChild variant="outline" className="w-full">
+              <a href="sms:01084176637">
+                <MessageSquare className="mr-2 h-4 w-4" />
+                개발자에게 문자하기
+              </a>
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
