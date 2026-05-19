@@ -8,7 +8,7 @@ import type { Employee } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Loader2, Phone, MessageSquare, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft } from "lucide-react";
 
 // 이름+사번 확인 후, PIN 미등록이면 "register", 등록돼 있으면 "verify".
 type Step = "credentials" | "register" | "verify";
@@ -268,28 +268,6 @@ export function LoginForm() {
           </form>
         )}
 
-        <div className="mt-6 space-y-3 text-center">
-          <p className="text-muted-foreground text-sm">
-            사번과 근무순서가 틀리면 언제든지 연락주세요.
-          </p>
-          <p className="text-muted-foreground text-xs">
-            시스템개발자 -손희범-
-          </p>
-          <div className="flex flex-col gap-2">
-            <Button asChild variant="outline" className="w-full">
-              <a href="tel:01084176637">
-                <Phone className="mr-2 h-4 w-4" />
-                개발자에게 전화하기
-              </a>
-            </Button>
-            <Button asChild variant="outline" className="w-full">
-              <a href="sms:01084176637">
-                <MessageSquare className="mr-2 h-4 w-4" />
-                개발자에게 문자하기
-              </a>
-            </Button>
-          </div>
-        </div>
       </div>
     </div>
   );
