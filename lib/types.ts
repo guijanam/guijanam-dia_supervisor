@@ -22,6 +22,9 @@ export interface Employee {
   employee_number: string | null;
   phone_number: string | null;
   role: UserRole;
+  // 근무순서 RPC 계산의 기준점(앵커). 잘못되면 본인 근무표 전체가 어긋남.
+  reference_date: string | null;
+  reference_shift: string | null;
 }
 
 export interface SpecialSchedule {

@@ -10,6 +10,7 @@ import type {
   SpecialScheduleWithEmployee,
 } from "@/lib/types";
 import { getTodayMonthStr, getDayName, getTurnColorClass } from "@/lib/schedule-utils";
+import { isValidShift, isValidRefDate } from "@/lib/reference";
 import { cn } from "@/lib/utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
@@ -41,6 +42,7 @@ import {
   ChevronRight,
   Plus,
   KeyRound,
+  CalendarCog,
 } from "lucide-react";
 
 interface Row extends SpecialScheduleWithEmployee {
@@ -80,6 +82,27 @@ export function AdminDashboard() {
   const [pinBusyId, setPinBusyId] = useState<number | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinDone, setPinDone] = useState<string | null>(null);
+
+  // 기준 근무 수정 모달 상태
+  const [refOpen, setRefOpen] = useState(false);
+  const [refSearch, setRefSearch] = useState("");
+  const [refList, setRefList] = useState<
+    Array<{
+      staff_id: number;
+      staff_name: string;
+      staff_position: string;
+      reference_date: string | null;
+      reference_shift: string | null;
+    }>
+  >([]);
+  const [refListLoading, setRefListLoading] = useState(false);
+  const [refSelectedId, setRefSelectedId] = useState<number | null>(null);
+  const [refDate, setRefDate] = useState("");
+  const [refShift, setRefShift] = useState("");
+  const [refConfirmOpen, setRefConfirmOpen] = useState(false);
+  const [refBusy, setRefBusy] = useState(false);
+  const [refError, setRefError] = useState<string | null>(null);
+  const [refDone, setRefDone] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -342,6 +365,95 @@ export function AdminDashboard() {
     }
   };
 
+  const openRefModal = async () => {
+    setRefError(null);
+    setRefDone(null);
+    setRefSearch("");
+    setRefSelectedId(null);
+    setRefDate("");
+    setRefShift("");
+    setRefOpen(true);
+    setRefListLoading(true);
+    try {
+      const { data, error: eErr } = await supabase
+        .from("coworker_list")
+        .select("staff_id, staff_name, staff_position, reference_date, reference_shift")
+        .order("staff_name", { ascending: true });
+      if (eErr) throw eErr;
+      setRefList(
+        (data ?? []) as Array<{
+          staff_id: number;
+          staff_name: string;
+          staff_position: string;
+          reference_date: string | null;
+          reference_shift: string | null;
+        }>
+      );
+    } catch (err) {
+      setRefError(err instanceof Error ? err.message : "직원 목록 로딩 실패");
+    } finally {
+      setRefListLoading(false);
+    }
+  };
+
+  const selectRefEmployee = (staffId: number) => {
+    const emp = refList.find((e) => e.staff_id === staffId);
+    if (!emp) return;
+    setRefSelectedId(staffId);
+    setRefDate(emp.reference_date ?? "");
+    setRefShift(emp.reference_shift ?? "");
+    setRefError(null);
+    setRefDone(null);
+  };
+
+  const requestRefSave = () => {
+    setRefError(null);
+    const date = refDate.trim();
+    const shift = refShift.trim();
+    if (date && !isValidRefDate(date)) {
+      setRefError("기준일 형식이 올바르지 않습니다. (YYYY-MM-DD)");
+      return;
+    }
+    if (shift && !isValidShift(shift)) {
+      setRefError(
+        "기준 근무번호 형식이 올바르지 않습니다. 예) 56, 52~, 휴22, 대11~"
+      );
+      return;
+    }
+    setRefConfirmOpen(true);
+  };
+
+  const doRefSave = async () => {
+    if (refSelectedId == null) return;
+    setRefBusy(true);
+    setRefError(null);
+    const nextDate = refDate.trim() || null;
+    const nextShift = refShift.trim() || null;
+    try {
+      const { error: upErr } = await supabase
+        .from("coworker_list")
+        .update({ reference_date: nextDate, reference_shift: nextShift })
+        .eq("staff_id", refSelectedId);
+      if (upErr) throw upErr;
+      setRefList((prev) =>
+        prev.map((e) =>
+          e.staff_id === refSelectedId
+            ? { ...e, reference_date: nextDate, reference_shift: nextShift }
+            : e
+        )
+      );
+      const name =
+        refList.find((e) => e.staff_id === refSelectedId)?.staff_name ?? "";
+      setRefDone(`${name}님의 기준 근무 정보가 저장되었습니다.`);
+      setRefConfirmOpen(false);
+    } catch (err) {
+      setRefError(err instanceof Error ? err.message : "저장 실패");
+      setRefConfirmOpen(false);
+    } finally {
+      setRefBusy(false);
+    }
+  };
+
   const exportExcel = () => {
     const sheetData = filtered.map((r) => ({
       사번: r.employee?.employee_number ?? "",
@@ -465,6 +577,9 @@ export function AdminDashboard() {
         </Button>
         <Button size="sm" variant="outline" onClick={openPinModal}>
           <KeyRound className="h-4 w-4" /> PIN 초기화
+        </Button>
+        <Button size="sm" variant="outline" onClick={openRefModal}>
+          <CalendarCog className="h-4 w-4" /> 기준근무 수정
         </Button>
         <Button
           size="sm"
@@ -681,6 +796,159 @@ export function AdminDashboard() {
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 "등록"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={refOpen} onOpenChange={setRefOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>기준 근무 수정</DialogTitle>
+            <DialogDescription>
+              직원의 기준일/기준 근무번호를 수정합니다. 이 값은 근무표 계산의
+              기준점이라, 바꾸면 해당 직원의 근무표 전체가 다시 계산됩니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          {refError && (
+            <p className="text-destructive text-sm font-medium">{refError}</p>
+          )}
+          {refDone && (
+            <p className="text-sm font-medium text-green-600 dark:text-green-400">
+              {refDone}
+            </p>
+          )}
+
+          <Input
+            type="text"
+            placeholder="이름 검색"
+            value={refSearch}
+            onChange={(e) => setRefSearch(e.target.value)}
+            className="h-9"
+          />
+
+          <div className="max-h-52 overflow-auto border rounded-md divide-y">
+            {refListLoading && (
+              <p className="text-muted-foreground text-sm text-center py-6">
+                직원 목록 로딩 중...
+              </p>
+            )}
+            {!refListLoading &&
+              (() => {
+                const q = refSearch.trim().toLowerCase();
+                const list = q
+                  ? refList.filter((e) =>
+                      e.staff_name.toLowerCase().includes(q)
+                    )
+                  : refList;
+                if (list.length === 0) {
+                  return (
+                    <p className="text-muted-foreground text-sm text-center py-6">
+                      검색 결과가 없습니다.
+                    </p>
+                  );
+                }
+                return list.map((emp) => (
+                  <button
+                    type="button"
+                    key={emp.staff_id}
+                    onClick={() => selectRefEmployee(emp.staff_id)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm",
+                      refSelectedId === emp.staff_id
+                        ? "bg-accent"
+                        : "hover:bg-accent/50"
+                    )}
+                  >
+                    <span>
+                      {emp.staff_name}
+                      {emp.staff_position ? (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          ({emp.staff_position})
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-muted-foreground text-xs whitespace-nowrap">
+                      {emp.reference_date ?? "-"} / {emp.reference_shift ?? "-"}
+                    </span>
+                  </button>
+                ));
+              })()}
+          </div>
+
+          {refSelectedId != null && (
+            <div className="flex flex-col gap-3 border-t pt-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">기준일</span>
+                <Input
+                  type="date"
+                  value={refDate}
+                  disabled={refBusy}
+                  onChange={(e) => setRefDate(e.target.value)}
+                  className="h-9"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">기준 근무번호</span>
+                <Input
+                  type="text"
+                  value={refShift}
+                  disabled={refBusy}
+                  placeholder="예) 56, 52~, 휴22, 대11~"
+                  onChange={(e) => setRefShift(e.target.value)}
+                  className="h-9"
+                />
+              </label>
+              <Button
+                onClick={requestRefSave}
+                disabled={refBusy}
+                className="w-full"
+              >
+                저장
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={refConfirmOpen}
+        onOpenChange={(o) => !refBusy && setRefConfirmOpen(o)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">
+              근무표 변경 확인
+            </DialogTitle>
+            <DialogDescription>
+              <span className="font-semibold text-foreground">
+                {refList.find((e) => e.staff_id === refSelectedId)?.staff_name}
+              </span>
+              님의 기준 근무 정보를 바꾸면 해당 직원 근무표 전체가 다시
+              계산됩니다. 정말 저장하시겠습니까?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              disabled={refBusy}
+              onClick={() => setRefConfirmOpen(false)}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={refBusy}
+              onClick={doRefSave}
+            >
+              {refBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "저장"
               )}
             </Button>
           </div>
