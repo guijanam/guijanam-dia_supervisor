@@ -122,61 +122,44 @@ export function DayModal({
               신청 내역이 없습니다.
             </p>
           ) : (
-            <div className="grid grid-cols-2 divide-x max-h-[40vh] overflow-auto">
-              {(["기관사", "차장"] as const).map((pos) => {
-                const group = allEntries.filter(
-                  (e) => e.staff_position === pos
-                );
+            <div className="flex flex-col divide-y max-h-[40vh] overflow-auto">
+              {allEntries.map((e) => {
+                const isSelf = e.staff_id === employee.staff_id;
                 return (
-                  <div key={pos} className="flex flex-col min-w-0">
-                    <div className="px-3 py-1.5 text-xs font-semibold text-center bg-muted/30 sticky top-0">
-                      {pos} ({group.length})
-                    </div>
-                    {group.length === 0 ? (
-                      <p className="text-xs text-muted-foreground py-3 text-center">
-                        없음
-                      </p>
-                    ) : (
-                      <div className="flex flex-col divide-y">
-                        {group.map((e) => (
-                          <div
-                            key={e.id}
-                            className={cn(
-                              "flex items-center justify-between gap-1.5 px-2 py-2 text-sm",
-                              e.staff_id === employee.staff_id && "bg-accent"
-                            )}
-                          >
-                            <span className="min-w-0 truncate">
-                              <span className="font-semibold">
-                                {e.staff_name}
-                              </span>
-                              {e.staff_id === employee.staff_id && (
-                                <span className="text-primary font-medium">
-                                  {" "}
-                                  · 본인
-                                </span>
-                              )}
-                              <span className="text-muted-foreground">
-                                {" · "}근무:{" "}
-                              </span>
-                              <span className="font-medium">
-                                {e.regularTurn ?? "-"}
-                              </span>
-                            </span>
-                            <span
-                              className={cn(
-                                "shrink-0 text-xs font-bold rounded px-1.5 py-0.5",
-                                e.record_type === "지근"
-                                  ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
-                                  : "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
-                              )}
-                            >
-                              {e.record_type}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                  <div
+                    key={e.id}
+                    className={cn(
+                      "flex items-center justify-between gap-1.5 px-2 py-2 text-sm",
+                      isSelf && "bg-accent"
                     )}
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className="font-semibold">
+                        {isSelf ? e.staff_name : "동료"}
+                      </span>
+                      {isSelf && (
+                        <span className="text-primary font-medium">
+                          {" "}
+                          · 본인
+                        </span>
+                      )}
+                      <span className="text-muted-foreground">
+                        {" · "}근무:{" "}
+                      </span>
+                      <span className="font-medium">
+                        {e.regularTurn ?? "-"}
+                      </span>
+                    </span>
+                    <span
+                      className={cn(
+                        "shrink-0 text-xs font-bold rounded px-1.5 py-0.5",
+                        e.record_type === "지근"
+                          ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                          : "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
+                      )}
+                    >
+                      {e.record_type}
+                    </span>
                   </div>
                 );
               })}

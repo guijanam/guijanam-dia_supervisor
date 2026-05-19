@@ -20,6 +20,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Loader2, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { DayModal } from "@/components/day-modal";
 import { AnnouncementBoard } from "@/components/announcement-board";
+import { ReferenceEditor } from "@/components/reference-editor";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -162,14 +163,17 @@ export function UserCalendar() {
         }
       }
 
+      // 본인과 같은 직책(기관사/차장)의 신청만 노출.
       const aMap = new Map<string, DayEntry[]>();
       for (const row of list) {
         const emp = empMap.get(row.staff_id);
+        const position = emp?.staff_position ?? "";
+        if (position !== employee.staff_position) continue;
         const entry: DayEntry = {
           id: row.id,
           staff_id: row.staff_id,
           staff_name: emp?.staff_name ?? `(미상 ${row.staff_id})`,
-          staff_position: emp?.staff_position ?? "",
+          staff_position: position,
           record_type: row.record_type,
           regularTurn:
             regularByStaff.get(`${row.staff_id}|${row.target_date}`) ?? null,
@@ -215,6 +219,7 @@ export function UserCalendar() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <ReferenceEditor />
           <ThemeToggle />
           <Button variant="ghost" size="icon-sm" onClick={logout} title="로그아웃">
             <LogOut className="h-4 w-4" />
@@ -305,24 +310,30 @@ export function UserCalendar() {
                   </span>
                 )}
                 <div className="mt-auto flex flex-col gap-0.5">
-                  {entries.map((e) => (
-                    <span
-                      key={e.id}
-                      title={`${e.staff_name} (${e.staff_position}) ${e.record_type}`}
-                      className={cn(
-                        "text-[10px] font-bold rounded px-1 truncate",
-                        e.record_type === "지휴"
-                          ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
-                          : e.staff_position === "차장"
-                            ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
-                            : "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
-                        e.staff_id === employee.staff_id &&
-                          "ring-1 ring-primary"
-                      )}
-                    >
-                      {e.staff_name}
-                    </span>
-                  ))}
+                  {entries.map((e) => {
+                    const isSelf = e.staff_id === employee.staff_id;
+                    return (
+                      <span
+                        key={e.id}
+                        title={
+                          isSelf
+                            ? `${e.staff_name} ${e.record_type}`
+                            : e.record_type
+                        }
+                        className={cn(
+                          "text-[10px] font-bold rounded px-1 truncate",
+                          e.record_type === "지휴"
+                            ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
+                            : e.staff_position === "차장"
+                              ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                              : "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
+                          isSelf && "ring-1 ring-primary"
+                        )}
+                      >
+                        {isSelf ? e.staff_name : e.record_type}
+                      </span>
+                    );
+                  })}
                 </div>
               </button>
             );
