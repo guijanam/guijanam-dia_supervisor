@@ -40,6 +40,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  KeyRound,
 } from "lucide-react";
 
 interface Row extends SpecialScheduleWithEmployee {
@@ -72,6 +73,13 @@ export function AdminDashboard() {
   const [addType, setAddType] = useState<RecordType>("지근");
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // PIN 초기화 모달 상태
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pinSearch, setPinSearch] = useState("");
+  const [pinBusyId, setPinBusyId] = useState<number | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinDone, setPinDone] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -280,6 +288,60 @@ export function AdminDashboard() {
     }
   };
 
+  const openPinModal = async () => {
+    setPinError(null);
+    setPinDone(null);
+    setPinSearch("");
+    setPinOpen(true);
+    if (empList.length === 0) {
+      setEmpLoading(true);
+      try {
+        const { data, error: eErr } = await supabase
+          .from("coworker_list")
+          .select("staff_id, staff_name, staff_position")
+          .order("staff_name", { ascending: true });
+        if (eErr) throw eErr;
+        setEmpList(
+          (data ?? []) as Array<{
+            staff_id: number;
+            staff_name: string;
+            staff_position: string;
+          }>
+        );
+      } catch (err) {
+        setPinError(
+          err instanceof Error ? err.message : "직원 목록 로딩 실패"
+        );
+      } finally {
+        setEmpLoading(false);
+      }
+    }
+  };
+
+  const resetPin = async (staffId: number, staffName: string) => {
+    if (
+      !confirm(
+        `${staffName}님의 PIN 을 초기화할까요?\n초기화하면 해당 직원이 다음 로그인 시 PIN 을 다시 설정합니다.`
+      )
+    )
+      return;
+    setPinBusyId(staffId);
+    setPinError(null);
+    setPinDone(null);
+    try {
+      const { error: upErr } = await supabase
+        .from("coworker_list")
+        .update({ pin_hash: null })
+        .eq("staff_id", staffId);
+      if (upErr) throw upErr;
+      setPinDone(`${staffName}님의 PIN 이 초기화되었습니다.`);
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : "PIN 초기화 실패");
+    } finally {
+      setPinBusyId(null);
+    }
+  };
+
   const exportExcel = () => {
     const sheetData = filtered.map((r) => ({
       사번: r.employee?.employee_number ?? "",
@@ -400,6 +462,9 @@ export function AdminDashboard() {
         </Button>
         <Button size="sm" variant="outline" onClick={openAddModal}>
           <Plus className="h-4 w-4" /> 신규 등록
+        </Button>
+        <Button size="sm" variant="outline" onClick={openPinModal}>
+          <KeyRound className="h-4 w-4" /> PIN 초기화
         </Button>
         <Button
           size="sm"
@@ -618,6 +683,87 @@ export function AdminDashboard() {
                 "등록"
               )}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pinOpen} onOpenChange={setPinOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>PIN 초기화</DialogTitle>
+            <DialogDescription>
+              PIN 을 잊은 직원을 검색해 초기화합니다. 초기화된 직원은 다음
+              로그인 시 PIN 을 새로 설정합니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          {pinError && (
+            <p className="text-destructive text-sm font-medium">{pinError}</p>
+          )}
+          {pinDone && (
+            <p className="text-sm font-medium text-green-600 dark:text-green-400">
+              {pinDone}
+            </p>
+          )}
+
+          <Input
+            type="text"
+            placeholder="이름 검색"
+            value={pinSearch}
+            onChange={(e) => setPinSearch(e.target.value)}
+            className="h-9"
+          />
+
+          <div className="max-h-72 overflow-auto border rounded-md divide-y">
+            {empLoading && (
+              <p className="text-muted-foreground text-sm text-center py-6">
+                직원 목록 로딩 중...
+              </p>
+            )}
+            {!empLoading &&
+              (() => {
+                const q = pinSearch.trim().toLowerCase();
+                const list = q
+                  ? empList.filter((e) =>
+                      e.staff_name.toLowerCase().includes(q)
+                    )
+                  : empList;
+                if (list.length === 0) {
+                  return (
+                    <p className="text-muted-foreground text-sm text-center py-6">
+                      검색 결과가 없습니다.
+                    </p>
+                  );
+                }
+                return list.map((emp) => (
+                  <div
+                    key={emp.staff_id}
+                    className="flex items-center justify-between gap-2 px-3 py-2"
+                  >
+                    <span className="text-sm">
+                      {emp.staff_name}
+                      {emp.staff_position ? (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          ({emp.staff_position})
+                        </span>
+                      ) : null}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={pinBusyId === emp.staff_id}
+                      onClick={() => resetPin(emp.staff_id, emp.staff_name)}
+                    >
+                      {pinBusyId === emp.staff_id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "초기화"
+                      )}
+                    </Button>
+                  </div>
+                ));
+              })()}
           </div>
         </DialogContent>
       </Dialog>

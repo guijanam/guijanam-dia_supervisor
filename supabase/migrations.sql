@@ -117,3 +117,14 @@ create policy announcements_read   on public.announcements for select using (tru
 create policy announcements_insert on public.announcements for insert with check (true);
 create policy announcements_update on public.announcements for update using (true) with check (true);
 create policy announcements_delete on public.announcements for delete using (true);
+
+-- ============================================================
+-- 7) 개인 PIN 인증 -------------------------------------------
+--  - 사번은 동료끼리 공유되는 준-공개 정보라 본인 외 접속이 가능했음.
+--    본인만 아는 4~6자리 PIN 을 추가해 타인 접속을 차단.
+--  - pin_hash 는 평문 PIN 을 SHA-256(staff_id + PIN) 으로 해시한 값.
+--    NULL = 아직 PIN 미등록 → 최초 로그인 시 등록 화면 노출.
+--  - 관리자가 pin_hash 를 NULL 로 UPDATE 하면 PIN 초기화(직원 재등록).
+-- ============================================================
+alter table public.coworker_list
+  add column if not exists pin_hash text;
