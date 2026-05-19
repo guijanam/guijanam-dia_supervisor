@@ -1,5 +1,6 @@
 import { eachDayOfInterval, format, getDay, parse, startOfMonth, endOfMonth, addDays, startOfWeek, endOfWeek } from "date-fns";
-import type { ScheduleRecord } from "./types";
+import type { ScheduleRecord, JigeunCaps } from "./types";
+import { DEFAULT_JIGEUN_CAPS } from "./types";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
 export const WEEKEND_HOLIDAY_TURNS = ["31", "32", "33", "34", "35", "36", "37"];
@@ -31,6 +32,20 @@ export function getDayColorClass(dateString: string, holidays?: Set<string>): st
   if (dayName === "토") return "text-blue-500";
   if (dayName === "일") return "text-red-500";
   return "";
+}
+
+// 요일/공휴일 구분별 지근 정원 (직책 공통).
+// 우선순위: 공휴일 > 토 > 일 > 평일. caps 미전달 시 기본값 사용.
+export function getPositionCap(
+  dateString: string,
+  holidays?: Set<string>,
+  caps: JigeunCaps = DEFAULT_JIGEUN_CAPS
+): number {
+  if (holidays?.has(dateString)) return caps.holiday;
+  const dayName = getDayName(dateString);
+  if (dayName === "토") return caps.saturday;
+  if (dayName === "일") return caps.sunday;
+  return caps.weekday;
 }
 
 export function getTurnColorClass(turnText: string, dateString: string, holidays?: Set<string>): string {

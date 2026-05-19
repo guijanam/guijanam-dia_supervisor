@@ -14,6 +14,8 @@ export type UserRole = "user" | "admin";
 
 export type RecordType = "지근" | "지휴";
 
+export type LotteryStatus = "won" | "lost";
+
 // 직원 마스터: 기존 coworker_list 테이블을 재활용
 export interface Employee {
   staff_id: number;
@@ -32,6 +34,8 @@ export interface SpecialSchedule {
   staff_id: number;
   target_date: string;
   record_type: RecordType;
+  lottery_status?: LotteryStatus | null;
+  lottery_at?: string | null;
   created_at?: string;
 }
 
@@ -42,6 +46,21 @@ export interface SpecialScheduleWithEmployee extends SpecialSchedule {
     "staff_name" | "employee_number" | "staff_position"
   > | null;
 }
+
+// 앱 설정: 요일/공휴일 구분별 지근 정원 (직책 공통, 단일 행 id=1)
+export interface JigeunCaps {
+  weekday: number;
+  saturday: number;
+  sunday: number;
+  holiday: number;
+}
+
+export const DEFAULT_JIGEUN_CAPS: JigeunCaps = {
+  weekday: 4,
+  saturday: 2,
+  sunday: 4,
+  holiday: 4,
+};
 
 // 공지사항: 관리자가 작성, 일반 직원은 읽기 전용
 export interface Announcement {

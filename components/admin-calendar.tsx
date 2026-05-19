@@ -3,19 +3,28 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
-import type { RecordType, ScheduleRecord } from "@/lib/types";
+import type {
+  RecordType,
+  ScheduleRecord,
+  LotteryStatus,
+  JigeunCaps,
+} from "@/lib/types";
+import { DEFAULT_JIGEUN_CAPS } from "@/lib/types";
 import {
   getTodayMonthStr,
   getCalendarGrid,
   isSameMonth,
   getDayColorClass,
   getDayName,
+  getPositionCap,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AnnouncementAdmin } from "@/components/announcement-admin";
+import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import {
   Loader2,
   LogOut,
@@ -33,6 +42,9 @@ import {
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
+const POSITIONS = ["기관사", "차장"] as const;
+type Position = (typeof POSITIONS)[number];
+
 interface SpecialEntry {
   id: string;
   staff_id: number;
@@ -40,6 +52,14 @@ interface SpecialEntry {
   staff_position: string;
   record_type: RecordType;
   regularTurn: string | null;
+  lottery_status: LotteryStatus | null;
+  lottery_at: string | null;
+}
+
+function countJigeun(entries: SpecialEntry[], pos: Position): number {
+  return entries.filter(
+    (e) => e.staff_position === pos && e.record_type === "지근"
+  ).length;
 }
 
 export function AdminCalendar() {
@@ -53,8 +73,22 @@ export function AdminCalendar() {
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
+
+  // 날짜별 직책별 지근 정원 초과 여부 (홀리데이 비동기 로딩 의존)
+  const overCapByDate = useMemo(() => {
+    const m = new Map<string, { 기관사: boolean; 차장: boolean }>();
+    for (const [date, entries] of specialMap) {
+      const cap = getPositionCap(date, holidays, caps);
+      m.set(date, {
+        기관사: countJigeun(entries, "기관사") > cap,
+        차장: countJigeun(entries, "차장") > cap,
+      });
+    }
+    return m;
+  }, [specialMap, holidays, caps]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -65,29 +99,56 @@ export function AdminCalendar() {
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
 
     try {
-      const [specialResult, holidayResult, scheduleResult] = await Promise.all([
-        supabase
-          .from("special_schedules")
-          .select("id, staff_id, target_date, record_type")
-          .gte("target_date", start)
-          .lte("target_date", end)
-          .order("target_date", { ascending: true }),
-        supabase
-          .from("holidays")
-          .select("locdate")
-          .eq("is_holiday", "Y")
-          .gte("locdate", start)
-          .lte("locdate", end),
-        supabase
-          .rpc("get_schedule_by_range", {
-            p_start_date: start,
-            p_end_date: end,
-          })
-          .range(0, 10000),
-      ]);
+      const [specialResult, holidayResult, scheduleResult, settingsResult] =
+        await Promise.all([
+          supabase
+            .from("special_schedules")
+            .select(
+              "id, staff_id, target_date, record_type, lottery_status, lottery_at"
+            )
+            .gte("target_date", start)
+            .lte("target_date", end)
+            .order("target_date", { ascending: true }),
+          supabase
+            .from("holidays")
+            .select("locdate")
+            .eq("is_holiday", "Y")
+            .gte("locdate", start)
+            .lte("locdate", end),
+          supabase
+            .rpc("get_schedule_by_range", {
+              p_start_date: start,
+              p_end_date: end,
+            })
+            .range(0, 10000),
+          supabase
+            .from("app_settings")
+            .select(
+              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday"
+            )
+            .eq("id", 1)
+            .maybeSingle(),
+        ]);
 
       if (specialResult.error) throw specialResult.error;
       if (scheduleResult.error) throw scheduleResult.error;
+
+      const s = settingsResult.data as {
+        jigeun_cap_weekday: number;
+        jigeun_cap_saturday: number;
+        jigeun_cap_sunday: number;
+        jigeun_cap_holiday: number;
+      } | null;
+      setCaps(
+        s
+          ? {
+              weekday: s.jigeun_cap_weekday,
+              saturday: s.jigeun_cap_saturday,
+              sunday: s.jigeun_cap_sunday,
+              holiday: s.jigeun_cap_holiday,
+            }
+          : DEFAULT_JIGEUN_CAPS
+      );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑
       const regularMap = new Map<string, string>();
@@ -103,6 +164,8 @@ export function AdminCalendar() {
         staff_id: number;
         target_date: string;
         record_type: RecordType;
+        lottery_status: LotteryStatus | null;
+        lottery_at: string | null;
       }>;
 
       // staff_id → 직원 정보 매핑
@@ -136,6 +199,8 @@ export function AdminCalendar() {
           record_type: row.record_type,
           regularTurn:
             regularMap.get(`${row.staff_id}|${row.target_date}`) ?? null,
+          lottery_status: row.lottery_status ?? null,
+          lottery_at: row.lottery_at ?? null,
         };
         const arr = sMap.get(row.target_date);
         if (arr) arr.push(entry);
@@ -205,6 +270,82 @@ export function AdminCalendar() {
     }
   };
 
+  // 정원 초과 직책에 대해 무작위 추첨 → cap 명 당첨, 나머지 탈락 (지근만)
+  const runLottery = async (pos: Position) => {
+    if (!selectedDate) return;
+    const cap = getPositionCap(selectedDate, holidays, caps);
+    const pool = (specialMap.get(selectedDate) ?? []).filter(
+      (e) => e.staff_position === pos && e.record_type === "지근"
+    );
+    if (pool.length <= cap) return;
+    if (
+      !confirm(
+        `${selectedDate} ${pos} 지근 ${pool.length}명 중 ${cap}명을 추첨합니다.`
+      )
+    )
+      return;
+
+    const shuffled = [...pool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const winners = new Set(shuffled.slice(0, cap).map((e) => e.id));
+    const wonIds = pool.filter((e) => winners.has(e.id)).map((e) => e.id);
+    const lostIds = pool.filter((e) => !winners.has(e.id)).map((e) => e.id);
+    const now = new Date().toISOString();
+
+    setBusyId(`lottery-${pos}`);
+    setError(null);
+    try {
+      const { error: e1 } = await supabase
+        .from("special_schedules")
+        .update({ lottery_status: "won", lottery_at: now })
+        .in("id", wonIds);
+      if (e1) throw e1;
+      const { error: e2 } = await supabase
+        .from("special_schedules")
+        .update({ lottery_status: "lost", lottery_at: now })
+        .in("id", lostIds);
+      if (e2) throw e2;
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "추첨 실패");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // 탈락자를 다른 날짜로 이동 (lottery 필드 초기화)
+  const rescheduleLoser = async (entry: SpecialEntry, newDate: string) => {
+    if (!newDate || newDate === selectedDate) return;
+    setBusyId(entry.id);
+    setError(null);
+    try {
+      const { error: upErr } = await supabase
+        .from("special_schedules")
+        .update({
+          target_date: newDate,
+          lottery_status: null,
+          lottery_at: null,
+        })
+        .eq("id", entry.id);
+      if (upErr) throw upErr;
+      await fetchData();
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === "23505") {
+        setError(
+          `${entry.staff_name}님은 ${newDate}에 이미 신청 내역이 있어 이동할 수 없습니다.`
+        );
+      } else {
+        setError(err instanceof Error ? err.message : "날짜 변경 실패");
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const selectedEntries = selectedDate
     ? specialMap.get(selectedDate) ?? []
     : [];
@@ -220,6 +361,7 @@ export function AdminCalendar() {
             <span className="text-muted-foreground"> · 관리자</span>
           </div>
           <AnnouncementAdmin />
+          <JigeunCapSettings caps={caps} onSaved={fetchData} />
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
@@ -273,13 +415,17 @@ export function AdminCalendar() {
           {grid.map((date) => {
             const inMonth = isSameMonth(date, monthValue);
             const entries = specialMap.get(date) ?? [];
+            const oc = overCapByDate.get(date);
+            const isOver = !!oc && (oc.기관사 || oc.차장);
             return (
               <button
                 key={date}
                 onClick={() => setSelectedDate(date)}
                 className={cn(
                   "min-h-[64px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col gap-0.5",
-                  !inMonth && "opacity-35"
+                  !inMonth && "opacity-35",
+                  isOver &&
+                    "ring-2 ring-amber-500 bg-amber-50 dark:bg-amber-950/40"
                 )}
               >
                 <span
@@ -336,14 +482,43 @@ export function AdminCalendar() {
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-auto">
-              {(["기관사", "차장"] as const).map((pos) => {
+              {POSITIONS.map((pos) => {
                 const group = selectedEntries.filter(
                   (e) => e.staff_position === pos
                 );
+                const cap = selectedDate
+                  ? getPositionCap(selectedDate, holidays, caps)
+                  : caps.weekday;
+                const jigeunCount = group.filter(
+                  (e) => e.record_type === "지근"
+                ).length;
+                const isOver = jigeunCount > cap;
+                const drawn = group.some((e) => e.lottery_status != null);
                 return (
                   <div key={pos} className="flex flex-col gap-1 min-w-0">
-                    <div className="px-2 py-1.5 text-xs font-semibold text-center bg-muted/40 rounded-md sticky top-0">
-                      {pos} ({group.length})
+                    <div className="px-2 py-1.5 text-xs font-semibold bg-muted/40 rounded-md sticky top-0 flex items-center justify-between gap-1">
+                      <span
+                        className={cn(isOver && "text-destructive font-bold")}
+                      >
+                        {pos} ({group.length}) · 지근 {jigeunCount}/{cap}
+                      </span>
+                      {isOver && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          disabled={busyId === `lottery-${pos}`}
+                          onClick={() => runLottery(pos)}
+                          title="지근 정원 초과 — 무작위 추첨"
+                        >
+                          {busyId === `lottery-${pos}` ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : drawn ? (
+                            "재추첨"
+                          ) : (
+                            "추첨"
+                          )}
+                        </Button>
+                      )}
                     </div>
                     {group.length === 0 ? (
                       <p className="text-xs text-muted-foreground py-3 text-center">
@@ -359,6 +534,16 @@ export function AdminCalendar() {
                             <span className="font-semibold">
                               {e.staff_name}
                             </span>
+                            {e.lottery_status === "won" && (
+                              <span className="ml-1 text-[10px] font-bold rounded px-1 bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300">
+                                당첨
+                              </span>
+                            )}
+                            {e.lottery_status === "lost" && (
+                              <span className="ml-1 text-[10px] font-bold rounded px-1 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
+                                탈락
+                              </span>
+                            )}
                             <span className="text-muted-foreground">
                               {" · "}근무:{" "}
                             </span>
@@ -392,6 +577,22 @@ export function AdminCalendar() {
                               )}
                             </Button>
                           </div>
+                          {e.lottery_status === "lost" && (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                날짜 변경:
+                              </span>
+                              <Input
+                                type="date"
+                                className="h-8 text-xs"
+                                disabled={busyId === e.id}
+                                defaultValue={selectedDate ?? undefined}
+                                onChange={(ev) =>
+                                  rescheduleLoser(e, ev.target.value)
+                                }
+                              />
+                            </div>
+                          )}
                         </div>
                       ))
                     )}

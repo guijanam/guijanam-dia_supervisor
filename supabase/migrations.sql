@@ -128,3 +128,42 @@ create policy announcements_delete on public.announcements for delete using (tru
 -- ============================================================
 alter table public.coworker_list
   add column if not exists pin_hash text;
+
+-- ============================================================
+-- 8) 추첨(lottery) 결과 컬럼 ---------------------------------
+--  - 정원 초과(지근) 시 직책별 무작위 추첨 결과를 영속화.
+--  - lottery_status: NULL = 미추첨, 'won' = 당첨, 'lost' = 탈락.
+--  - lottery_at: 마지막 추첨 시각 (재추첨 시 갱신).
+--  - 탈락자는 자동 삭제하지 않으며, 관리자가 target_date 를
+--    변경하면 lottery_status/lottery_at 을 NULL 로 초기화.
+-- ============================================================
+alter table public.special_schedules
+  add column if not exists lottery_status text
+    check (lottery_status in ('won', 'lost'));
+alter table public.special_schedules
+  add column if not exists lottery_at timestamptz;
+
+-- ============================================================
+-- 9) 앱 설정(요일별 지근 정원) -------------------------------
+--  - 관리자가 요일/공휴일 구분별 지근 정원을 직접 조정.
+--  - 단일 행(id=1)만 사용. 직책(기관사/차장) 공통 적용.
+--  - 우선순위: 공휴일 > 토 > 일 > 평일.
+-- ============================================================
+create table if not exists public.app_settings (
+  id                   integer primary key default 1,
+  jigeun_cap_weekday   integer not null default 4,
+  jigeun_cap_saturday  integer not null default 2,
+  jigeun_cap_sunday    integer not null default 4,
+  jigeun_cap_holiday   integer not null default 4,
+  updated_at           timestamptz not null default now(),
+  constraint app_settings_single_row check (id = 1)
+);
+
+insert into public.app_settings (id) values (1)
+  on conflict (id) do nothing;
+
+alter table public.app_settings enable row level security;
+drop policy if exists app_settings_read   on public.app_settings;
+drop policy if exists app_settings_update on public.app_settings;
+create policy app_settings_read   on public.app_settings for select using (true);
+create policy app_settings_update on public.app_settings for update using (true) with check (true);
