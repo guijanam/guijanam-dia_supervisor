@@ -6,9 +6,10 @@ import { LoginForm } from "@/components/login-form";
 import { UserCalendar } from "@/components/user-calendar";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { AdminCalendar } from "@/components/admin-calendar";
+import { QuarterBalance } from "@/components/quarter-balance";
 import { cn } from "@/lib/utils";
 
-type AdminView = "calendar" | "dashboard";
+type AdminView = "calendar" | "dashboard" | "quarter";
 
 export default function Home() {
   const { employee, isReady, isAdmin } = useAuth();
@@ -30,12 +31,19 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-dvh">
       <div className="flex-1 pb-14">
-        {adminView === "dashboard" ? <AdminDashboard /> : <AdminCalendar />}
+        {adminView === "dashboard" ? (
+          <AdminDashboard />
+        ) : adminView === "quarter" ? (
+          <QuarterBalance />
+        ) : (
+          <AdminCalendar />
+        )}
       </div>
       <nav className="fixed bottom-0 left-0 w-full z-50 flex border-t bg-background">
         {(
           [
             { label: "통합 관리", value: "dashboard" },
+            { label: "분기 휴무 검증", value: "quarter" },
             { label: "내 캘린더", value: "calendar" },
           ] as { label: string; value: AdminView }[]
         ).map((tab) => (
