@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { StaffListLink } from "@/components/staff-list-link";
 import { AnnouncementAdmin } from "@/components/announcement-admin";
 import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import {
@@ -364,6 +365,7 @@ export function AdminCalendar() {
           <JigeunCapSettings caps={caps} onSaved={fetchData} />
         </div>
         <div className="flex items-center gap-2">
+          <StaffListLink />
           <ThemeToggle />
           <Button
             variant="ghost"
