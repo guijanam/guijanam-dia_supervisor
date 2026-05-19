@@ -53,7 +53,7 @@ interface Row extends SpecialScheduleWithEmployee {
 }
 
 export function AdminDashboard() {
-  const { employee, logout } = useAuth();
+  const { logout } = useAuth();
   const [monthValue, setMonthValue] = useState(getTodayMonthStr());
   const [nameFilter, setNameFilter] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
@@ -520,8 +520,7 @@ export function AdminDashboard() {
       <header className="flex items-center justify-between p-3 border-b">
         <div className="flex items-center gap-2">
           <div className="text-sm">
-            <span className="font-bold">{employee?.staff_name}</span>
-            <span className="text-muted-foreground"> · 관리자</span>
+            <span className="font-bold">관리자</span>
           </div>
           <AnnouncementAdmin />
         </div>

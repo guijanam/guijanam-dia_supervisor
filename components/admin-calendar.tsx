@@ -23,7 +23,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { StaffListLink } from "@/components/staff-list-link";
 import { AnnouncementAdmin } from "@/components/announcement-admin";
 import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import {
@@ -64,7 +63,7 @@ function countJigeun(entries: SpecialEntry[], pos: Position): number {
 }
 
 export function AdminCalendar() {
-  const { employee, logout } = useAuth();
+  const { logout } = useAuth();
   const [monthValue, setMonthValue] = useState(getTodayMonthStr());
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialEntry[]>>(
     new Map()
@@ -351,21 +350,17 @@ export function AdminCalendar() {
     ? specialMap.get(selectedDate) ?? []
     : [];
 
-  if (!employee) return null;
-
   return (
     <div className="flex flex-col min-h-dvh">
       <header className="flex items-center justify-between p-3 border-b">
         <div className="flex items-center gap-2">
           <div className="text-sm">
-            <span className="font-bold">{employee.staff_name}</span>
-            <span className="text-muted-foreground"> · 관리자</span>
+            <span className="font-bold">관리자</span>
           </div>
           <AnnouncementAdmin />
           <JigeunCapSettings caps={caps} onSaved={fetchData} />
         </div>
         <div className="flex items-center gap-2">
-          <StaffListLink />
           <ThemeToggle />
           <Button
             variant="ghost"

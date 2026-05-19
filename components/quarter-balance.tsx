@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { StaffListLink } from "@/components/staff-list-link";
 import { Loader2, LogOut, Download } from "lucide-react";
 
 // 분기별 휴무 목표치: 운휴 + 휴 + 지휴 − 지근 = 24
@@ -272,7 +271,6 @@ export function QuarterBalance() {
           <span className="text-muted-foreground"> · 관리자</span>
         </div>
         <div className="flex items-center gap-2">
-          <StaffListLink />
           <ThemeToggle />
           <Button
             variant="ghost"
