@@ -15,7 +15,7 @@ export function StaffListLink() {
       title="직원명단 관리"
     >
       <Users className="h-4 w-4" />
-      직원명단 관리
+      직원명단
     </Button>
   );
 }
