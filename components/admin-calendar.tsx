@@ -24,7 +24,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AnnouncementAdmin } from "@/components/announcement-admin";
-import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import {
   Loader2,
   LogOut,
@@ -358,7 +357,6 @@ export function AdminCalendar() {
             <span className="font-bold">관리자</span>
           </div>
           <AnnouncementAdmin />
-          <JigeunCapSettings caps={caps} onSaved={fetchData} />
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />

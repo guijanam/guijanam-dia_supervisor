@@ -8,7 +8,9 @@ import type {
   RecordType,
   ScheduleRecord,
   SpecialScheduleWithEmployee,
+  JigeunCaps,
 } from "@/lib/types";
+import { DEFAULT_JIGEUN_CAPS } from "@/lib/types";
 import { getTodayMonthStr, getDayName, getTurnColorClass } from "@/lib/schedule-utils";
 import { isValidShift, isValidRefDate } from "@/lib/reference";
 import { cn } from "@/lib/utils";
@@ -26,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StaffListLink } from "@/components/staff-list-link";
 import { AnnouncementAdmin } from "@/components/announcement-admin";
+import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import {
   Dialog,
   DialogContent,
@@ -60,6 +63,7 @@ export function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
 
   // 전체 삭제 확인 모달 상태
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
@@ -113,7 +117,7 @@ export function AdminDashboard() {
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
 
     try {
-      const [{ data: schedules, error: qErr }, scheduleResult] =
+      const [{ data: schedules, error: qErr }, scheduleResult, settingsResult] =
         await Promise.all([
           supabase
             .from("special_schedules")
@@ -127,10 +131,28 @@ export function AdminDashboard() {
               p_end_date: end,
             })
             .range(0, 10000),
+          supabase
+            .from("app_settings")
+            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday")
+            .eq("id", 1)
+            .maybeSingle(),
         ]);
 
       if (qErr) throw qErr;
       if (scheduleResult.error) throw scheduleResult.error;
+
+      const s = settingsResult.data as {
+        jigeun_cap_weekday: number;
+        jigeun_cap_saturday: number;
+        jigeun_cap_sunday: number;
+        jigeun_cap_holiday: number;
+      } | null;
+      setCaps(s ? {
+        weekday: s.jigeun_cap_weekday,
+        saturday: s.jigeun_cap_saturday,
+        sunday: s.jigeun_cap_sunday,
+        holiday: s.jigeun_cap_holiday,
+      } : DEFAULT_JIGEUN_CAPS);
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑
       const regularMap = new Map<string, string>();
@@ -525,6 +547,7 @@ export function AdminDashboard() {
           <AnnouncementAdmin />
         </div>
         <div className="flex items-center gap-2">
+          <JigeunCapSettings caps={caps} onSaved={fetchData} />
           <StaffListLink />
           <ThemeToggle />
           <Button
