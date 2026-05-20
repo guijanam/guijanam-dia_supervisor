@@ -70,7 +70,8 @@ export function UserCalendar() {
       else if (sp.record_type === "지휴") jihyuCount++;
     }
 
-    return { hueCount, weekendTurnCount, jigeunCount, jihyuCount };
+    const totalRest = hueCount + weekendTurnCount + jihyuCount - jigeunCount;
+    return { hueCount, weekendTurnCount, jigeunCount, jihyuCount, totalRest };
   }, [regularMap, specialMap, holidays, monthValue]);
 
   const fetchData = useCallback(async () => {
@@ -251,6 +252,9 @@ export function UserCalendar() {
         </span>
         <span className="rounded px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
           지휴 {monthStats.jihyuCount}
+        </span>
+        <span className="rounded px-2 py-0.5 bg-primary/10 text-primary border border-primary/30">
+          총휴 {monthStats.totalRest}
         </span>
       </div>
 
