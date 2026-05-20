@@ -30,6 +30,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
+  ExternalLink,
 } from "lucide-react";
 import {
   Dialog,
@@ -379,6 +380,17 @@ export function AdminCalendar() {
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(1)}>
           <ChevronRight className="h-4 w-4" />
         </Button>
+        <a
+          href="https://dongseoung-month-cowoker.vercel.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-2"
+        >
+          <Button variant="outline" size="sm" className="gap-1">
+            <ExternalLink className="h-4 w-4" />
+            <span className="text-xs">동승무 월근무</span>
+          </Button>
+        </a>
       </div>
 
       {error && (
