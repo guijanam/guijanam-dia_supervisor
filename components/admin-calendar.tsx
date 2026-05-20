@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type {
@@ -17,6 +17,7 @@ import {
   getDayColorClass,
   getDayName,
   getPositionCap,
+  WEEKEND_HOLIDAY_TURNS,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -68,12 +69,27 @@ export function AdminCalendar() {
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialEntry[]>>(
     new Map()
   );
+  const [regularByStaff, setRegularByStaff] = useState<Map<string, string>>(
+    new Map()
+  );
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
+  const [expandedLoserId, setExpandedLoserId] = useState<string | null>(null);
+
+  // 선택한 날짜에 즉시 지근/지휴를 신규 등록하기 위한 인라인 폼 상태
+  const [empList, setEmpList] = useState<
+    Array<{ staff_id: number; staff_name: string; staff_position: string }>
+  >([]);
+  const [empLoading, setEmpLoading] = useState(false);
+  const empFetchStarted = useRef(false);
+  const [addStaffId, setAddStaffId] = useState<string>("");
+  const [addType, setAddType] = useState<RecordType>("지근");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
 
@@ -150,7 +166,8 @@ export function AdminCalendar() {
           : DEFAULT_JIGEUN_CAPS
       );
 
-      // (staff_id, 날짜) → 원래 근무(turn) 매핑
+      // (staff_id, 날짜) → 원래 근무(turn) 매핑.
+      // 펼침 그리드에서 탈락자의 휴무/운휴를 보여주기 위해 state로도 보존.
       const regularMap = new Map<string, string>();
       for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
         const dateStr = row.date
@@ -158,6 +175,7 @@ export function AdminCalendar() {
           : "";
         if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
       }
+      setRegularByStaff(regularMap);
 
       const list = (specialResult.data ?? []) as Array<{
         id: string;
@@ -223,6 +241,46 @@ export function AdminCalendar() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // 날짜 모달이 닫히거나 다른 날짜로 바뀌면 펼침 뷰·등록 폼도 초기화
+  useEffect(() => {
+    setExpandedLoserId(null);
+    setAddStaffId("");
+    setAddType("지근");
+    setAddError(null);
+  }, [selectedDate]);
+
+  // 모달이 처음 열릴 때 직원 목록 lazy-load (세션당 한 번만).
+  // ref 가드로 StrictMode/재렌더에 의한 중복 호출을 막는다.
+  useEffect(() => {
+    if (!selectedDate) return;
+    if (empFetchStarted.current) return;
+    empFetchStarted.current = true;
+    setEmpLoading(true);
+    (async () => {
+      try {
+        const { data, error: eErr } = await supabase
+          .from("coworker_list")
+          .select("staff_id, staff_name, staff_position")
+          .order("staff_name", { ascending: true });
+        if (eErr) throw eErr;
+        setEmpList(
+          (data ?? []) as Array<{
+            staff_id: number;
+            staff_name: string;
+            staff_position: string;
+          }>
+        );
+      } catch (err) {
+        empFetchStarted.current = false; // 실패 시 재시도 허용
+        setAddError(
+          err instanceof Error ? err.message : "직원 목록 로딩 실패"
+        );
+      } finally {
+        setEmpLoading(false);
+      }
+    })();
+  }, [selectedDate]);
 
   const shiftMonth = (delta: number) => {
     const [year, month] = monthValue.split("-").map(Number);
@@ -314,6 +372,166 @@ export function AdminCalendar() {
     } finally {
       setBusyId(null);
     }
+  };
+
+  // 선택한 날짜에 지근/지휴 신규 등록 — admin-dashboard의 submitAdd 와 동일 패턴
+  const submitAdd = async () => {
+    if (!selectedDate) return;
+    if (!addStaffId) {
+      setAddError("직원을 선택하세요.");
+      return;
+    }
+    setAddBusy(true);
+    setAddError(null);
+    try {
+      const { error: upErr } = await supabase
+        .from("special_schedules")
+        .upsert(
+          {
+            staff_id: Number(addStaffId),
+            target_date: selectedDate,
+            record_type: addType,
+          },
+          { onConflict: "staff_id,target_date" }
+        );
+      if (upErr) throw upErr;
+      setAddStaffId("");
+      await fetchData();
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : "등록 실패");
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  // 탈락자의 해당 월 근무표를 7열 그리드로 렌더 — 휴무/운휴를 강조해
+  // 관리자가 어디로 옮길지 즉시 판단할 수 있게 한다.
+  const renderLoserGrid = (entry: SpecialEntry) => {
+    const monthGrid = getCalendarGrid(monthValue);
+    const myEntries = new Map<string, SpecialEntry>();
+    for (const [date, arr] of specialMap) {
+      for (const sp of arr) {
+        if (sp.staff_id === entry.staff_id) {
+          myEntries.set(date, sp);
+        }
+      }
+    }
+    return (
+      <div className="mt-1 rounded-md border bg-muted/30 p-2">
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {WEEKDAYS.map((wd, i) => (
+            <div
+              key={wd}
+              className={cn(
+                "text-center text-[10px] font-bold",
+                i === 0 && "text-red-500",
+                i === 6 && "text-blue-500"
+              )}
+            >
+              {wd}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {monthGrid.map((date) => {
+            const inMonth = isSameMonth(date, monthValue);
+            const turn = regularByStaff.get(`${entry.staff_id}|${date}`);
+            const dayName = getDayName(date);
+            const isWeekendOrHoliday =
+              dayName === "토" || dayName === "일" || holidays.has(date);
+            const isHue = !!turn && turn.includes("휴");
+            const isUnHue =
+              !!turn &&
+              isWeekendOrHoliday &&
+              WEEKEND_HOLIDAY_TURNS.includes(turn);
+            const isRest = isHue || isUnHue;
+            const mine = myEntries.get(date);
+            const isOrigin = date === selectedDate;
+            const disabled = !inMonth || isOrigin || !!mine || busyId === entry.id;
+            return (
+              <button
+                key={date}
+                type="button"
+                disabled={disabled}
+                onClick={() => handleLoserCellClick(entry, date, myEntries)}
+                title={
+                  !inMonth
+                    ? ""
+                    : isOrigin
+                      ? "현재 신청된 날짜"
+                      : mine
+                        ? `이미 ${mine.record_type} 신청됨`
+                        : `${date} (${dayName})${turn ? ` · ${turn}` : ""}${
+                            isHue ? " · 휴무" : isUnHue ? " · 운휴" : ""
+                          }`
+                }
+                className={cn(
+                  "min-h-[40px] rounded border px-1 py-0.5 text-left flex flex-col gap-0.5 transition-colors",
+                  !inMonth && "opacity-30 pointer-events-none",
+                  isRest &&
+                    "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800",
+                  isOrigin && "ring-2 ring-amber-500",
+                  !disabled && "hover:bg-accent cursor-pointer",
+                  disabled && !isOrigin && "cursor-not-allowed opacity-60"
+                )}
+              >
+                <span
+                  className={cn(
+                    "text-[10px] font-semibold leading-none",
+                    getDayColorClass(date, holidays)
+                  )}
+                >
+                  {Number(date.slice(8, 10))}
+                </span>
+                <span className="text-[10px] font-medium leading-tight truncate">
+                  {turn ?? ""}
+                </span>
+                {mine && (
+                  <span
+                    className={cn(
+                      "text-[9px] font-bold leading-none rounded px-1 self-start",
+                      mine.record_type === "지근"
+                        ? "bg-green-200 text-green-800 dark:bg-green-900 dark:text-green-200"
+                        : "bg-red-200 text-red-800 dark:bg-red-900 dark:text-red-200"
+                    )}
+                  >
+                    {mine.record_type}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          빨간 셀 = 휴무/운휴 · 주황 테두리 = 현재 신청일 · 셀 클릭 시 그 날짜로 이동
+        </p>
+      </div>
+    );
+  };
+
+  // 펼침 그리드에서 셀 클릭 → 그 날짜로 이동
+  const handleLoserCellClick = (
+    entry: SpecialEntry,
+    date: string,
+    myEntries: Map<string, SpecialEntry>
+  ) => {
+    if (!isSameMonth(date, monthValue)) return;
+    if (date === selectedDate) return;
+    if (myEntries.has(date)) {
+      const existing = myEntries.get(date)!;
+      setError(
+        `${entry.staff_name}님은 ${date}에 이미 ${existing.record_type} 신청이 있어 이동할 수 없습니다.`
+      );
+      return;
+    }
+    if (
+      !confirm(
+        `${entry.staff_name}님의 지근 신청을 ${date}로 이동할까요?`
+      )
+    )
+      return;
+    setExpandedLoserId(null);
+    void rescheduleLoser(entry, date);
   };
 
   // 탈락자를 다른 날짜로 이동 (lottery 필드 초기화)
@@ -483,6 +701,58 @@ export function AdminCalendar() {
             <p className="text-destructive text-sm font-medium">{error}</p>
           )}
 
+          <div className="flex flex-col gap-1.5 rounded-md border bg-muted/30 p-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold">신규 등록</span>
+              {addError && (
+                <span className="text-[10px] text-destructive font-medium truncate">
+                  {addError}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={addStaffId}
+                disabled={empLoading || addBusy}
+                onChange={(ev) => setAddStaffId(ev.target.value)}
+                className="h-8 flex-1 min-w-0 rounded-md border bg-background px-2 text-xs"
+              >
+                <option value="">
+                  {empLoading ? "직원 로딩 중..." : "직원 선택"}
+                </option>
+                {empList.map((emp) => (
+                  <option key={emp.staff_id} value={emp.staff_id}>
+                    {emp.staff_name}
+                    {emp.staff_position ? ` (${emp.staff_position})` : ""}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={addType}
+                disabled={addBusy}
+                onChange={(ev) => setAddType(ev.target.value as RecordType)}
+                className="h-8 rounded-md border bg-background px-2 text-xs"
+              >
+                <option value="지근">지근</option>
+                <option value="지휴">지휴</option>
+              </select>
+              <Button
+                size="xs"
+                onClick={submitAdd}
+                disabled={addBusy || empLoading || !addStaffId}
+              >
+                {addBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "등록"
+                )}
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              같은 직원·날짜에 기존 신청이 있으면 구분이 덮어쓰기 됩니다.
+            </p>
+          </div>
+
           {selectedEntries.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
               신청 내역이 없습니다.
@@ -585,19 +855,37 @@ export function AdminCalendar() {
                             </Button>
                           </div>
                           {e.lottery_status === "lost" && (
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] text-muted-foreground shrink-0">
-                                날짜 변경:
-                              </span>
-                              <Input
-                                type="date"
-                                className="h-8 text-xs"
-                                disabled={busyId === e.id}
-                                defaultValue={selectedDate ?? undefined}
-                                onChange={(ev) =>
-                                  rescheduleLoser(e, ev.target.value)
-                                }
-                              />
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  className="flex-1"
+                                  disabled={busyId === e.id}
+                                  onClick={() =>
+                                    setExpandedLoserId((prev) =>
+                                      prev === e.id ? null : e.id
+                                    )
+                                  }
+                                  title="해당 직원의 휴무/운휴를 확인하고 이동할 날짜 선택"
+                                >
+                                  {expandedLoserId === e.id
+                                    ? "휴무 보기 닫기 ▴"
+                                    : "휴무 보기 ▾"}
+                                </Button>
+                                <Input
+                                  type="date"
+                                  className="h-8 text-xs w-36"
+                                  disabled={busyId === e.id}
+                                  defaultValue={selectedDate ?? undefined}
+                                  onChange={(ev) =>
+                                    rescheduleLoser(e, ev.target.value)
+                                  }
+                                  title="직접 날짜 입력"
+                                />
+                              </div>
+                              {expandedLoserId === e.id &&
+                                renderLoserGrid(e)}
                             </div>
                           )}
                         </div>

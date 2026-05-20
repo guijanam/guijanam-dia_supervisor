@@ -44,9 +44,18 @@ export function UserCalendar() {
     new Map()
   );
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
+  const [requestFreezeDate, setRequestFreezeDate] = useState<string | null>(
+    null
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  const isFrozen = useMemo(() => {
+    if (!requestFreezeDate) return false;
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    return todayStr > requestFreezeDate;
+  }, [requestFreezeDate]);
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
 
@@ -84,29 +93,40 @@ export function UserCalendar() {
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
 
     try {
-      const [scheduleResult, specialResult, holidayResult] = await Promise.all([
-        supabase
-          .rpc("get_schedule_by_range", {
-            p_start_date: start,
-            p_end_date: end,
-          })
-          .range(0, 10000),
-        supabase
-          .from("special_schedules")
-          .select("id, staff_id, target_date, record_type")
-          .gte("target_date", start)
-          .lte("target_date", end)
-          .order("target_date", { ascending: true }),
-        supabase
-          .from("holidays")
-          .select("locdate")
-          .eq("is_holiday", "Y")
-          .gte("locdate", start)
-          .lte("locdate", end),
-      ]);
+      const [scheduleResult, specialResult, holidayResult, settingsResult] =
+        await Promise.all([
+          supabase
+            .rpc("get_schedule_by_range", {
+              p_start_date: start,
+              p_end_date: end,
+            })
+            .range(0, 10000),
+          supabase
+            .from("special_schedules")
+            .select("id, staff_id, target_date, record_type")
+            .gte("target_date", start)
+            .lte("target_date", end)
+            .order("target_date", { ascending: true }),
+          supabase
+            .from("holidays")
+            .select("locdate")
+            .eq("is_holiday", "Y")
+            .gte("locdate", start)
+            .lte("locdate", end),
+          supabase
+            .from("app_settings")
+            .select("request_freeze_date")
+            .eq("id", 1)
+            .maybeSingle(),
+        ]);
 
       if (scheduleResult.error) throw scheduleResult.error;
       if (specialResult.error) throw specialResult.error;
+
+      setRequestFreezeDate(
+        (settingsResult.data as { request_freeze_date: string | null } | null)
+          ?.request_freeze_date ?? null
+      );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑 (전 직원)
       const regularByStaff = new Map<string, string>();
@@ -258,6 +278,13 @@ export function UserCalendar() {
         </span>
       </div>
 
+      {isFrozen && (
+        <p className="mx-2 mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          관리자가 지정한 신청 마감일({requestFreezeDate})이 지났습니다.
+          지근/지휴 신청·삭제가 제한됩니다.
+        </p>
+      )}
+
       {error && (
         <p className="text-destructive text-sm font-medium text-center px-4 pb-2">
           {error}
@@ -351,6 +378,8 @@ export function UserCalendar() {
         regularTurn={selectedDate ? regularMap.get(selectedDate) ?? null : null}
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
+        isFrozen={isFrozen}
+        freezeDate={requestFreezeDate}
         onClose={() => setSelectedDate(null)}
         onChanged={fetchData}
       />

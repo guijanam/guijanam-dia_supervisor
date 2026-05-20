@@ -62,6 +62,13 @@ export const DEFAULT_JIGEUN_CAPS: JigeunCaps = {
   holiday: 4,
 };
 
+// 앱 설정 집합: 지근 정원 + 신청 마감일.
+// requestFreezeDate 가 'YYYY-MM-DD' 이고 오늘이 그 이후이면 사용자 신청·삭제 차단.
+export interface AppSettings {
+  caps: JigeunCaps;
+  requestFreezeDate: string | null;
+}
+
 // 공지사항: 관리자가 작성, 일반 직원은 읽기 전용
 export interface Announcement {
   id: string;

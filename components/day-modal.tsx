@@ -22,6 +22,8 @@ interface DayModalProps {
   regularTurn: string | null;
   existing: SpecialSchedule | null;
   allEntries: DayEntry[];
+  isFrozen: boolean;
+  freezeDate: string | null;
   onClose: () => void;
   onChanged: () => void;
 }
@@ -32,6 +34,8 @@ export function DayModal({
   regularTurn,
   existing,
   allEntries,
+  isFrozen,
+  freezeDate,
   onClose,
   onChanged,
 }: DayModalProps) {
@@ -41,6 +45,7 @@ export function DayModal({
   if (!date) return null;
 
   const register = async (recordType: RecordType) => {
+    if (isFrozen) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -66,6 +71,7 @@ export function DayModal({
 
   const remove = async () => {
     if (!existing) return;
+    if (isFrozen) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -167,17 +173,24 @@ export function DayModal({
           )}
         </div>
 
+        {isFrozen && (
+          <p className="text-xs text-amber-700 dark:text-amber-300 text-center">
+            관리자가 지정한 신청 마감일({freezeDate})이 지나
+            지근/지휴 신청·삭제가 제한됩니다.
+          </p>
+        )}
+
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant={existing?.record_type === "지근" ? "default" : "outline"}
-            disabled={isSaving}
+            disabled={isSaving || isFrozen}
             onClick={() => register("지근")}
           >
             지근 신청
           </Button>
           <Button
             variant={existing?.record_type === "지휴" ? "default" : "outline"}
-            disabled={isSaving}
+            disabled={isSaving || isFrozen}
             onClick={() => register("지휴")}
           >
             지휴 신청
@@ -187,7 +200,7 @@ export function DayModal({
         {existing && (
           <Button
             variant="destructive"
-            disabled={isSaving}
+            disabled={isSaving || isFrozen}
             onClick={remove}
             className="w-full"
           >

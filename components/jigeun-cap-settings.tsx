@@ -25,14 +25,18 @@ const FIELDS: { key: keyof JigeunCaps; label: string }[] = [
 
 interface Props {
   caps: JigeunCaps;
+  freezeDate: string | null;
   onSaved: () => void;
 }
 
-export function JigeunCapSettings({ caps, onSaved }: Props) {
+export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
   const { isAdmin, employee } = useAuth();
 
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<JigeunCaps>(caps);
+  const [draftFreezeDate, setDraftFreezeDate] = useState<string>(
+    freezeDate ?? ""
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,9 +44,10 @@ export function JigeunCapSettings({ caps, onSaved }: Props) {
   useEffect(() => {
     if (open) {
       setDraft(caps);
+      setDraftFreezeDate(freezeDate ?? "");
       setError(null);
     }
-  }, [open, caps]);
+  }, [open, caps, freezeDate]);
 
   if (!isAdmin || !employee) return null;
 
@@ -65,6 +70,7 @@ export function JigeunCapSettings({ caps, onSaved }: Props) {
           jigeun_cap_saturday: draft.saturday,
           jigeun_cap_sunday: draft.sunday,
           jigeun_cap_holiday: draft.holiday,
+          request_freeze_date: draftFreezeDate ? draftFreezeDate : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -87,7 +93,7 @@ export function JigeunCapSettings({ caps, onSaved }: Props) {
         title="지근 정원 설정"
       >
         <Settings2 className="h-3.5 w-3.5 mr-1" />
-        정원
+        설정
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -122,6 +128,32 @@ export function JigeunCapSettings({ caps, onSaved }: Props) {
                 </span>
               </div>
             ))}
+          </div>
+
+          <div className="flex flex-col gap-1 pt-2 border-t">
+            <div className="flex items-center gap-3">
+              <label className="w-16 text-sm font-medium">신청 마감일</label>
+              <Input
+                type="date"
+                className="h-9"
+                value={draftFreezeDate}
+                disabled={isSaving}
+                onChange={(e) => setDraftFreezeDate(e.target.value)}
+              />
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setDraftFreezeDate("")}
+                disabled={isSaving || !draftFreezeDate}
+                title="마감일 해제"
+              >
+                해제
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground pl-[4.75rem]">
+              비우면 마감 없음. 마감일 다음날 0시부터 사용자의 지근/지휴
+              신청·삭제가 차단됩니다.
+            </p>
           </div>
 
           <div className="grid grid-cols-3 gap-2">

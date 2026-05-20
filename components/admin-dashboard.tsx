@@ -64,6 +64,7 @@ export function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
+  const [freezeDate, setFreezeDate] = useState<string | null>(null);
 
   // 전체 삭제 확인 모달 상태
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
@@ -133,7 +134,7 @@ export function AdminDashboard() {
             .range(0, 10000),
           supabase
             .from("app_settings")
-            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday")
+            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -146,6 +147,7 @@ export function AdminDashboard() {
         jigeun_cap_saturday: number;
         jigeun_cap_sunday: number;
         jigeun_cap_holiday: number;
+        request_freeze_date: string | null;
       } | null;
       setCaps(s ? {
         weekday: s.jigeun_cap_weekday,
@@ -153,6 +155,7 @@ export function AdminDashboard() {
         sunday: s.jigeun_cap_sunday,
         holiday: s.jigeun_cap_holiday,
       } : DEFAULT_JIGEUN_CAPS);
+      setFreezeDate(s?.request_freeze_date ?? null);
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑
       const regularMap = new Map<string, string>();
@@ -545,10 +548,32 @@ export function AdminDashboard() {
             <span className="font-bold">관리자</span>
           </div>
           <AnnouncementAdmin />
+          <span
+            className={cn(
+              "text-xs rounded px-1.5 py-0.5 border",
+              freezeDate
+                ? format(new Date(), "yyyy-MM-dd") > freezeDate
+                  ? "bg-red-100 text-red-700 border-red-300 dark:bg-red-900/50 dark:text-red-300"
+                  : "bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/50 dark:text-amber-300"
+                : "text-muted-foreground"
+            )}
+            title="사용자 지근/지휴 신청 마감일"
+          >
+            {freezeDate
+              ? `마감 ${freezeDate}${
+                  format(new Date(), "yyyy-MM-dd") > freezeDate
+                    ? " (잠김)"
+                    : ""
+                }`
+              : "마감 미설정"}
+          </span>
         </div>
         <div className="flex items-center gap-2">
-          <JigeunCapSettings caps={caps} onSaved={fetchData} />
-          <StaffListLink />
+          <JigeunCapSettings
+            caps={caps}
+            freezeDate={freezeDate}
+            onSaved={fetchData}
+          />
           <ThemeToggle />
           <Button
             variant="ghost"
@@ -613,6 +638,7 @@ export function AdminDashboard() {
         >
           <Download className="h-4 w-4" /> Excel 다운로드
         </Button>
+        <StaffListLink />
         <Button
           size="sm"
           variant="destructive"

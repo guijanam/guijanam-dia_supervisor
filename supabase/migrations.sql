@@ -167,3 +167,12 @@ drop policy if exists app_settings_read   on public.app_settings;
 drop policy if exists app_settings_update on public.app_settings;
 create policy app_settings_read   on public.app_settings for select using (true);
 create policy app_settings_update on public.app_settings for update using (true) with check (true);
+
+-- ============================================================
+-- 10) 신청 마감일 ----------------------------------------------
+--  - NULL = 마감 없음(언제든 신청 가능).
+--  - 값이 있으면 today > request_freeze_date 인 경우 사용자 신청/삭제 차단.
+--  - 관리자(role='admin')는 차단되지 않음 — admin-calendar/admin-dashboard 그대로 동작.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists request_freeze_date date;
