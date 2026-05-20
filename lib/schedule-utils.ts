@@ -1,9 +1,12 @@
 import { eachDayOfInterval, format, getDay, parse, startOfMonth, endOfMonth, addDays, startOfWeek, endOfWeek } from "date-fns";
 import type { ScheduleRecord, JigeunCaps } from "./types";
-import { DEFAULT_JIGEUN_CAPS } from "./types";
+import { DEFAULT_JIGEUN_CAPS, DEFAULT_WEEKEND_HOLIDAY_TURNS } from "./types";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
-export const WEEKEND_HOLIDAY_TURNS = ["31", "32", "33", "34", "35", "36", "37"];
+
+// 운휴 번호는 승무소마다 다르므로 app_settings.weekend_holiday_turns 에서 로드.
+// 호출부에서 명시적으로 전달하지 않은 경우의 안전망 기본값만 여기에 둔다.
+export { DEFAULT_WEEKEND_HOLIDAY_TURNS } from "./types";
 
 export function getTodayDateStr(): string {
   return format(new Date(), "yyyy-MM-dd");
@@ -48,11 +51,16 @@ export function getPositionCap(
   return caps.weekday;
 }
 
-export function getTurnColorClass(turnText: string, dateString: string, holidays?: Set<string>): string {
+export function getTurnColorClass(
+  turnText: string,
+  dateString: string,
+  holidays?: Set<string>,
+  weekendHolidayTurns: string[] = DEFAULT_WEEKEND_HOLIDAY_TURNS
+): string {
   const dayName = getDayName(dateString);
   const isHoliday = dayName === "토" || dayName === "일" || !!holidays?.has(dateString);
 
-  if (isHoliday && WEEKEND_HOLIDAY_TURNS.includes(turnText)) {
+  if (isHoliday && weekendHolidayTurns.includes(turnText)) {
     return "bg-red-100 dark:bg-red-900/40";
   }
   if (turnText.includes("휴")) return "bg-red-100 dark:bg-red-900/40";

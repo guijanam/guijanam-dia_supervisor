@@ -176,3 +176,12 @@ create policy app_settings_update on public.app_settings for update using (true)
 -- ============================================================
 alter table public.app_settings
   add column if not exists request_freeze_date date;
+
+-- ============================================================
+-- 11) 운휴 번호(주말/공휴일 비번 turn) -------------------------
+--  - 승무소마다 운휴로 간주되는 근무번호가 다르므로 관리자가 직접 지정.
+--  - 쉼표로 구분된 텍스트(예: '31,32,33,34,35,36,37').
+--  - 빈 문자열/NULL 이면 운휴 집계 없음.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists weekend_holiday_turns text not null default '31,32,33,34,35,36,37';

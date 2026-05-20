@@ -5,7 +5,8 @@ import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type { RecordType, ScheduleRecord } from "@/lib/types";
-import { getDayName, WEEKEND_HOLIDAY_TURNS } from "@/lib/schedule-utils";
+import { DEFAULT_WEEKEND_HOLIDAY_TURNS, parseTurnsText } from "@/lib/types";
+import { getDayName } from "@/lib/schedule-utils";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -97,6 +98,7 @@ export function QuarterBalance() {
         specialResult,
         holidayResult,
         empResult,
+        settingsResult,
       ] = await Promise.all([
         // RPC 10,000행 한도 회피: 월 단위로 나눠 호출 후 합산
         Promise.all(
@@ -123,6 +125,11 @@ export function QuarterBalance() {
         supabase
           .from("coworker_list")
           .select("staff_id, staff_name, staff_position, employee_number"),
+        supabase
+          .from("app_settings")
+          .select("weekend_holiday_turns")
+          .eq("id", 1)
+          .maybeSingle(),
       ]);
 
       const scheduleData: ScheduleRecord[] = [];
@@ -133,6 +140,13 @@ export function QuarterBalance() {
       if (specialResult.error) throw specialResult.error;
       if (holidayResult.error) throw holidayResult.error;
       if (empResult.error) throw empResult.error;
+
+      const settings = settingsResult.data as {
+        weekend_holiday_turns: string | null;
+      } | null;
+      const weekendHolidayTurns = settings
+        ? parseTurnsText(settings.weekend_holiday_turns)
+        : DEFAULT_WEEKEND_HOLIDAY_TURNS;
 
       const holidays = new Set<string>(
         (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
@@ -183,7 +197,7 @@ export function QuarterBalance() {
         const dayName = getDayName(dateStr);
         const isHoliday =
           dayName === "토" || dayName === "일" || holidays.has(dateStr);
-        if (isHoliday && WEEKEND_HOLIDAY_TURNS.includes(row.turn)) {
+        if (isHoliday && weekendHolidayTurns.includes(row.turn)) {
           r.weekendTurnCount++;
         }
       }

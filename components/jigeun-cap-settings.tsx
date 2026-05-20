@@ -4,7 +4,12 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type { JigeunCaps } from "@/lib/types";
-import { DEFAULT_JIGEUN_CAPS } from "@/lib/types";
+import {
+  DEFAULT_JIGEUN_CAPS,
+  DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  parseTurnsText,
+  formatTurnsText,
+} from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -26,10 +31,16 @@ const FIELDS: { key: keyof JigeunCaps; label: string }[] = [
 interface Props {
   caps: JigeunCaps;
   freezeDate: string | null;
+  weekendHolidayTurns: string[];
   onSaved: () => void;
 }
 
-export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
+export function JigeunCapSettings({
+  caps,
+  freezeDate,
+  weekendHolidayTurns,
+  onSaved,
+}: Props) {
   const { isAdmin, employee } = useAuth();
 
   const [open, setOpen] = useState(false);
@@ -37,17 +48,21 @@ export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
   const [draftFreezeDate, setDraftFreezeDate] = useState<string>(
     freezeDate ?? ""
   );
+  const [draftTurnsText, setDraftTurnsText] = useState<string>(
+    formatTurnsText(weekendHolidayTurns)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 다이얼로그 열 때마다 최신 caps 로 초기화
+  // 다이얼로그 열 때마다 최신 설정으로 초기화
   useEffect(() => {
     if (open) {
       setDraft(caps);
       setDraftFreezeDate(freezeDate ?? "");
+      setDraftTurnsText(formatTurnsText(weekendHolidayTurns));
       setError(null);
     }
-  }, [open, caps, freezeDate]);
+  }, [open, caps, freezeDate, weekendHolidayTurns]);
 
   if (!isAdmin || !employee) return null;
 
@@ -63,6 +78,7 @@ export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
     setIsSaving(true);
     setError(null);
     try {
+      const normalizedTurns = parseTurnsText(draftTurnsText);
       const { error: upErr } = await supabase
         .from("app_settings")
         .update({
@@ -71,6 +87,7 @@ export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
           jigeun_cap_sunday: draft.sunday,
           jigeun_cap_holiday: draft.holiday,
           request_freeze_date: draftFreezeDate ? draftFreezeDate : null,
+          weekend_holiday_turns: formatTurnsText(normalizedTurns),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -90,7 +107,7 @@ export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
         variant="outline"
         size="xs"
         onClick={() => setOpen(true)}
-        title="지근 정원 설정"
+        title="설정"
       >
         <Settings2 className="h-3.5 w-3.5 mr-1" />
         설정
@@ -99,7 +116,7 @@ export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>지근 정원 설정</DialogTitle>
+            <DialogTitle>설정</DialogTitle>
             <DialogDescription>
               요일/공휴일 구분별 지근 정원입니다. 기관사·차장 공통으로
               적용되며, 우선순위는 공휴일 &gt; 토 &gt; 일 &gt; 평일입니다.
@@ -156,12 +173,33 @@ export function JigeunCapSettings({ caps, freezeDate, onSaved }: Props) {
             </p>
           </div>
 
+          <div className="flex flex-col gap-1 pt-2 border-t">
+            <div className="flex items-start gap-3">
+              <label className="w-16 text-sm font-medium pt-2">운휴 번호</label>
+              <Input
+                type="text"
+                className="h-9"
+                placeholder="예: 31,32,33,34,35,36,37"
+                value={draftTurnsText}
+                disabled={isSaving}
+                onChange={(e) => setDraftTurnsText(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground pl-[4.75rem]">
+              주말/공휴일에 운휴로 집계할 근무번호를 쉼표로 구분해 입력하세요.
+              승무소마다 다르며, 비우면 운휴 집계가 되지 않습니다.
+            </p>
+          </div>
+
           <div className="grid grid-cols-3 gap-2">
             <Button
               variant="ghost"
-              onClick={() => setDraft(DEFAULT_JIGEUN_CAPS)}
+              onClick={() => {
+                setDraft(DEFAULT_JIGEUN_CAPS);
+                setDraftTurnsText(formatTurnsText(DEFAULT_WEEKEND_HOLIDAY_TURNS));
+              }}
               disabled={isSaving}
-              title="기본값(4/2/4/4)으로 되돌리기"
+              title="기본값(정원 4/2/4/4, 운휴 31~37)으로 되돌리기"
             >
               기본값
             </Button>

@@ -9,7 +9,11 @@ import type {
   LotteryStatus,
   JigeunCaps,
 } from "@/lib/types";
-import { DEFAULT_JIGEUN_CAPS } from "@/lib/types";
+import {
+  DEFAULT_JIGEUN_CAPS,
+  DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  parseTurnsText,
+} from "@/lib/types";
 import {
   getTodayMonthStr,
   getCalendarGrid,
@@ -17,7 +21,6 @@ import {
   getDayColorClass,
   getDayName,
   getPositionCap,
-  WEEKEND_HOLIDAY_TURNS,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -78,6 +81,9 @@ export function AdminCalendar() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
+  const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
+    DEFAULT_WEEKEND_HOLIDAY_TURNS
+  );
   const [expandedLoserId, setExpandedLoserId] = useState<string | null>(null);
 
   // 선택한 날짜에 즉시 지근/지휴를 신규 등록하기 위한 인라인 폼 상태
@@ -140,7 +146,7 @@ export function AdminCalendar() {
           supabase
             .from("app_settings")
             .select(
-              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday"
+              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns"
             )
             .eq("id", 1)
             .maybeSingle(),
@@ -154,6 +160,7 @@ export function AdminCalendar() {
         jigeun_cap_saturday: number;
         jigeun_cap_sunday: number;
         jigeun_cap_holiday: number;
+        weekend_holiday_turns: string | null;
       } | null;
       setCaps(
         s
@@ -164,6 +171,9 @@ export function AdminCalendar() {
               holiday: s.jigeun_cap_holiday,
             }
           : DEFAULT_JIGEUN_CAPS
+      );
+      setWeekendHolidayTurns(
+        s ? parseTurnsText(s.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑.
@@ -443,7 +453,7 @@ export function AdminCalendar() {
             const isUnHue =
               !!turn &&
               isWeekendOrHoliday &&
-              WEEKEND_HOLIDAY_TURNS.includes(turn);
+              weekendHolidayTurns.includes(turn);
             const isRest = isHue || isUnHue;
             const mine = myEntries.get(date);
             const isOrigin = date === selectedDate;

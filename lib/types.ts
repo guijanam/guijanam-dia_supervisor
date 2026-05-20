@@ -62,11 +62,36 @@ export const DEFAULT_JIGEUN_CAPS: JigeunCaps = {
   holiday: 4,
 };
 
-// 앱 설정 집합: 지근 정원 + 신청 마감일.
+// 앱 설정 집합: 지근 정원 + 신청 마감일 + 운휴 번호.
 // requestFreezeDate 가 'YYYY-MM-DD' 이고 오늘이 그 이후이면 사용자 신청·삭제 차단.
+// weekendHolidayTurns 는 주말/공휴일에 운휴로 집계되는 근무번호 목록(승무소별 상이).
 export interface AppSettings {
   caps: JigeunCaps;
   requestFreezeDate: string | null;
+  weekendHolidayTurns: string[];
+}
+
+export const DEFAULT_WEEKEND_HOLIDAY_TURNS: string[] = [
+  "31",
+  "32",
+  "33",
+  "34",
+  "35",
+  "36",
+  "37",
+];
+
+// 쉼표 텍스트('31,32,33') ↔ 배열 변환 유틸. 공백/빈 토큰은 제거.
+export function parseTurnsText(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+}
+
+export function formatTurnsText(turns: string[]): string {
+  return turns.join(",");
 }
 
 // 공지사항: 관리자가 작성, 일반 직원은 읽기 전용

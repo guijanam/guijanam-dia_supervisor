@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { ScheduleRecord, PositionTab } from "@/lib/types";
+import { DEFAULT_WEEKEND_HOLIDAY_TURNS, parseTurnsText } from "@/lib/types";
 import {
   getTodayMonthStr,
   generateDateRange,
@@ -23,6 +24,9 @@ export function ScheduleViewer() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
+  const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
+    DEFAULT_WEEKEND_HOLIDAY_TURNS
+  );
   const [maintenance, setMaintenance] = useState<{
     is_active: boolean;
     message: string;
@@ -33,7 +37,7 @@ export function ScheduleViewer() {
     setError(null);
 
     try {
-      const [scheduleResult, holidayResult] = await Promise.all([
+      const [scheduleResult, holidayResult, settingsResult] = await Promise.all([
         supabase
           .rpc("get_schedule_by_range", {
             p_start_date: start,
@@ -46,6 +50,11 @@ export function ScheduleViewer() {
           .eq("is_holiday", "Y")
           .gte("locdate", start)
           .lte("locdate", end),
+        supabase
+          .from("app_settings")
+          .select("weekend_holiday_turns")
+          .eq("id", 1)
+          .maybeSingle(),
       ]);
 
       if (scheduleResult.error) throw scheduleResult.error;
@@ -54,6 +63,13 @@ export function ScheduleViewer() {
         (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
       );
       setHolidays(holidayDates);
+
+      const settings = settingsResult.data as {
+        weekend_holiday_turns: string | null;
+      } | null;
+      setWeekendHolidayTurns(
+        settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
+      );
 
       if (!scheduleResult.data || scheduleResult.data.length === 0) {
         setAllData([]);
@@ -152,6 +168,7 @@ export function ScheduleViewer() {
           error={error}
           emptyMessage={emptyMessage}
           holidays={holidays}
+          weekendHolidayTurns={weekendHolidayTurns}
         />
       </div>
       <BottomTabs selectedTab={selectedTab} onTabChange={setSelectedTab} />

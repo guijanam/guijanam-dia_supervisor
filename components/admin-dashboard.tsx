@@ -10,7 +10,11 @@ import type {
   SpecialScheduleWithEmployee,
   JigeunCaps,
 } from "@/lib/types";
-import { DEFAULT_JIGEUN_CAPS } from "@/lib/types";
+import {
+  DEFAULT_JIGEUN_CAPS,
+  DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  parseTurnsText,
+} from "@/lib/types";
 import { getTodayMonthStr, getDayName, getTurnColorClass } from "@/lib/schedule-utils";
 import { isValidShift, isValidRefDate } from "@/lib/reference";
 import { cn } from "@/lib/utils";
@@ -65,6 +69,9 @@ export function AdminDashboard() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
   const [freezeDate, setFreezeDate] = useState<string | null>(null);
+  const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
+    DEFAULT_WEEKEND_HOLIDAY_TURNS
+  );
 
   // 전체 삭제 확인 모달 상태
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
@@ -134,7 +141,7 @@ export function AdminDashboard() {
             .range(0, 10000),
           supabase
             .from("app_settings")
-            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date")
+            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -148,6 +155,7 @@ export function AdminDashboard() {
         jigeun_cap_sunday: number;
         jigeun_cap_holiday: number;
         request_freeze_date: string | null;
+        weekend_holiday_turns: string | null;
       } | null;
       setCaps(s ? {
         weekday: s.jigeun_cap_weekday,
@@ -156,6 +164,9 @@ export function AdminDashboard() {
         holiday: s.jigeun_cap_holiday,
       } : DEFAULT_JIGEUN_CAPS);
       setFreezeDate(s?.request_freeze_date ?? null);
+      setWeekendHolidayTurns(
+        s ? parseTurnsText(s.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
+      );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑
       const regularMap = new Map<string, string>();
@@ -572,6 +583,7 @@ export function AdminDashboard() {
           <JigeunCapSettings
             caps={caps}
             freezeDate={freezeDate}
+            weekendHolidayTurns={weekendHolidayTurns}
             onSaved={fetchData}
           />
           <ThemeToggle />
@@ -714,7 +726,12 @@ export function AdminDashboard() {
                     className={cn(
                       "text-center text-sm whitespace-nowrap",
                       row.regularTurn
-                        ? getTurnColorClass(row.regularTurn, row.target_date)
+                        ? getTurnColorClass(
+                            row.regularTurn,
+                            row.target_date,
+                            undefined,
+                            weekendHolidayTurns
+                          )
                         : ""
                     )}
                   >

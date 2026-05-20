@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type { RecordType, ScheduleRecord, SpecialSchedule } from "@/lib/types";
+import { DEFAULT_WEEKEND_HOLIDAY_TURNS, parseTurnsText } from "@/lib/types";
 import {
   getTodayMonthStr,
   getCalendarGrid,
@@ -11,7 +12,6 @@ import {
   getDayColorClass,
   getTurnColorClass,
   getDayName,
-  WEEKEND_HOLIDAY_TURNS,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,9 @@ export function UserCalendar() {
   const [requestFreezeDate, setRequestFreezeDate] = useState<string | null>(
     null
   );
+  const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
+    DEFAULT_WEEKEND_HOLIDAY_TURNS
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -68,7 +71,7 @@ export function UserCalendar() {
       const dayName = getDayName(date);
       const isHoliday =
         dayName === "토" || dayName === "일" || holidays.has(date);
-      if (isHoliday && WEEKEND_HOLIDAY_TURNS.includes(turn)) weekendTurnCount++;
+      if (isHoliday && weekendHolidayTurns.includes(turn)) weekendTurnCount++;
     }
 
     let jigeunCount = 0;
@@ -81,7 +84,7 @@ export function UserCalendar() {
 
     const totalRest = hueCount + weekendTurnCount + jihyuCount - jigeunCount;
     return { hueCount, weekendTurnCount, jigeunCount, jihyuCount, totalRest };
-  }, [regularMap, specialMap, holidays, monthValue]);
+  }, [regularMap, specialMap, holidays, monthValue, weekendHolidayTurns]);
 
   const fetchData = useCallback(async () => {
     if (!employee) return;
@@ -115,7 +118,7 @@ export function UserCalendar() {
             .lte("locdate", end),
           supabase
             .from("app_settings")
-            .select("request_freeze_date")
+            .select("request_freeze_date, weekend_holiday_turns")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -123,9 +126,13 @@ export function UserCalendar() {
       if (scheduleResult.error) throw scheduleResult.error;
       if (specialResult.error) throw specialResult.error;
 
-      setRequestFreezeDate(
-        (settingsResult.data as { request_freeze_date: string | null } | null)
-          ?.request_freeze_date ?? null
+      const settings = settingsResult.data as {
+        request_freeze_date: string | null;
+        weekend_holiday_turns: string | null;
+      } | null;
+      setRequestFreezeDate(settings?.request_freeze_date ?? null);
+      setWeekendHolidayTurns(
+        settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑 (전 직원)
@@ -323,7 +330,7 @@ export function UserCalendar() {
                   "min-h-[64px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col",
                   !inMonth && "opacity-35",
                   turn &&
-                    getTurnColorClass(turn, date, holidays).includes("bg-red") &&
+                    getTurnColorClass(turn, date, holidays, weekendHolidayTurns).includes("bg-red") &&
                     "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800"
                 )}
               >

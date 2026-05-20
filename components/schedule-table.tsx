@@ -11,6 +11,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { getDayName, getDayColorClass, getTurnColorClass } from "@/lib/schedule-utils";
+import { DEFAULT_WEEKEND_HOLIDAY_TURNS } from "@/lib/types";
 
 interface ScheduleTableProps {
   names: string[];
@@ -20,6 +21,7 @@ interface ScheduleTableProps {
   error: string | null;
   emptyMessage: string | null;
   holidays: Set<string>;
+  weekendHolidayTurns?: string[];
 }
 
 export function ScheduleTable({
@@ -30,6 +32,7 @@ export function ScheduleTable({
   error,
   emptyMessage,
   holidays,
+  weekendHolidayTurns = DEFAULT_WEEKEND_HOLIDAY_TURNS,
 }: ScheduleTableProps) {
   if (isLoading) {
     return (
@@ -95,7 +98,7 @@ export function ScheduleTable({
                     key={date}
                     className={cn(
                       "text-center text-xs whitespace-nowrap px-2",
-                      getTurnColorClass(turn, date, holidays)
+                      getTurnColorClass(turn, date, holidays, weekendHolidayTurns)
                     )}
                   >
                     {turn}
