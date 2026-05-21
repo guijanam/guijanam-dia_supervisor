@@ -43,6 +43,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { LoserRescheduleCalendar } from "@/components/loser-reschedule-calendar";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -72,9 +73,6 @@ export function AdminCalendar() {
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialEntry[]>>(
     new Map()
   );
-  const [regularByStaff, setRegularByStaff] = useState<Map<string, string>>(
-    new Map()
-  );
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +82,7 @@ export function AdminCalendar() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
-  const [expandedLoserId, setExpandedLoserId] = useState<string | null>(null);
+  const [reschedTarget, setReschedTarget] = useState<SpecialEntry | null>(null);
 
   // 선택한 날짜에 즉시 지근/지휴를 신규 등록하기 위한 인라인 폼 상태
   const [empList, setEmpList] = useState<
@@ -176,8 +174,7 @@ export function AdminCalendar() {
         s ? parseTurnsText(s.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
 
-      // (staff_id, 날짜) → 원래 근무(turn) 매핑.
-      // 펼침 그리드에서 탈락자의 휴무/운휴를 보여주기 위해 state로도 보존.
+      // (staff_id, 날짜) → 원래 근무(turn) 매핑 — entry.regularTurn 채우기에만 사용.
       const regularMap = new Map<string, string>();
       for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
         const dateStr = row.date
@@ -185,7 +182,6 @@ export function AdminCalendar() {
           : "";
         if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
       }
-      setRegularByStaff(regularMap);
 
       const list = (specialResult.data ?? []) as Array<{
         id: string;
@@ -252,9 +248,8 @@ export function AdminCalendar() {
     fetchData();
   }, [fetchData]);
 
-  // 날짜 모달이 닫히거나 다른 날짜로 바뀌면 펼침 뷰·등록 폼도 초기화
+  // 날짜 모달이 닫히거나 다른 날짜로 바뀌면 등록 폼도 초기화
   useEffect(() => {
-    setExpandedLoserId(null);
     setAddStaffId("");
     setAddType("지근");
     setAddError(null);
@@ -412,136 +407,6 @@ export function AdminCalendar() {
     } finally {
       setAddBusy(false);
     }
-  };
-
-  // 탈락자의 해당 월 근무표를 7열 그리드로 렌더 — 휴무/운휴를 강조해
-  // 관리자가 어디로 옮길지 즉시 판단할 수 있게 한다.
-  const renderLoserGrid = (entry: SpecialEntry) => {
-    const monthGrid = getCalendarGrid(monthValue);
-    const myEntries = new Map<string, SpecialEntry>();
-    for (const [date, arr] of specialMap) {
-      for (const sp of arr) {
-        if (sp.staff_id === entry.staff_id) {
-          myEntries.set(date, sp);
-        }
-      }
-    }
-    return (
-      <div className="mt-1 rounded-md border bg-muted/30 p-2">
-        <div className="grid grid-cols-7 gap-1 mb-1">
-          {WEEKDAYS.map((wd, i) => (
-            <div
-              key={wd}
-              className={cn(
-                "text-center text-[10px] font-bold",
-                i === 0 && "text-red-500",
-                i === 6 && "text-blue-500"
-              )}
-            >
-              {wd}
-            </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {monthGrid.map((date) => {
-            const inMonth = isSameMonth(date, monthValue);
-            const turn = regularByStaff.get(`${entry.staff_id}|${date}`);
-            const dayName = getDayName(date);
-            const isWeekendOrHoliday =
-              dayName === "토" || dayName === "일" || holidays.has(date);
-            const isHue = !!turn && turn.includes("휴");
-            const isUnHue =
-              !!turn &&
-              isWeekendOrHoliday &&
-              weekendHolidayTurns.includes(turn);
-            const isRest = isHue || isUnHue;
-            const mine = myEntries.get(date);
-            const isOrigin = date === selectedDate;
-            const disabled = !inMonth || isOrigin || !!mine || busyId === entry.id;
-            return (
-              <button
-                key={date}
-                type="button"
-                disabled={disabled}
-                onClick={() => handleLoserCellClick(entry, date, myEntries)}
-                title={
-                  !inMonth
-                    ? ""
-                    : isOrigin
-                      ? "현재 신청된 날짜"
-                      : mine
-                        ? `이미 ${mine.record_type} 신청됨`
-                        : `${date} (${dayName})${turn ? ` · ${turn}` : ""}${
-                            isHue ? " · 휴무" : isUnHue ? " · 운휴" : ""
-                          }`
-                }
-                className={cn(
-                  "min-h-[40px] rounded border px-1 py-0.5 text-left flex flex-col gap-0.5 transition-colors",
-                  !inMonth && "opacity-30 pointer-events-none",
-                  isRest &&
-                    "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800",
-                  isOrigin && "ring-2 ring-amber-500",
-                  !disabled && "hover:bg-accent cursor-pointer",
-                  disabled && !isOrigin && "cursor-not-allowed opacity-60"
-                )}
-              >
-                <span
-                  className={cn(
-                    "text-[10px] font-semibold leading-none",
-                    getDayColorClass(date, holidays)
-                  )}
-                >
-                  {Number(date.slice(8, 10))}
-                </span>
-                <span className="text-[10px] font-medium leading-tight truncate">
-                  {turn ?? ""}
-                </span>
-                {mine && (
-                  <span
-                    className={cn(
-                      "text-[9px] font-bold leading-none rounded px-1 self-start",
-                      mine.record_type === "지근"
-                        ? "bg-green-200 text-green-800 dark:bg-green-900 dark:text-green-200"
-                        : "bg-red-200 text-red-800 dark:bg-red-900 dark:text-red-200"
-                    )}
-                  >
-                    {mine.record_type}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          빨간 셀 = 휴무/운휴 · 주황 테두리 = 현재 신청일 · 셀 클릭 시 그 날짜로 이동
-        </p>
-      </div>
-    );
-  };
-
-  // 펼침 그리드에서 셀 클릭 → 그 날짜로 이동
-  const handleLoserCellClick = (
-    entry: SpecialEntry,
-    date: string,
-    myEntries: Map<string, SpecialEntry>
-  ) => {
-    if (!isSameMonth(date, monthValue)) return;
-    if (date === selectedDate) return;
-    if (myEntries.has(date)) {
-      const existing = myEntries.get(date)!;
-      setError(
-        `${entry.staff_name}님은 ${date}에 이미 ${existing.record_type} 신청이 있어 이동할 수 없습니다.`
-      );
-      return;
-    }
-    if (
-      !confirm(
-        `${entry.staff_name}님의 지근 신청을 ${date}로 이동할까요?`
-      )
-    )
-      return;
-    setExpandedLoserId(null);
-    void rescheduleLoser(entry, date);
   };
 
   // 탈락자를 다른 날짜로 이동 (lottery 필드 초기화)
@@ -865,37 +730,27 @@ export function AdminCalendar() {
                             </Button>
                           </div>
                           {e.lottery_status === "lost" && (
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  size="xs"
-                                  variant="outline"
-                                  className="flex-1"
-                                  disabled={busyId === e.id}
-                                  onClick={() =>
-                                    setExpandedLoserId((prev) =>
-                                      prev === e.id ? null : e.id
-                                    )
-                                  }
-                                  title="해당 직원의 휴무/운휴를 확인하고 이동할 날짜 선택"
-                                >
-                                  {expandedLoserId === e.id
-                                    ? "휴무 보기 닫기 ▴"
-                                    : "휴무 보기 ▾"}
-                                </Button>
-                                <Input
-                                  type="date"
-                                  className="h-8 text-xs w-36"
-                                  disabled={busyId === e.id}
-                                  defaultValue={selectedDate ?? undefined}
-                                  onChange={(ev) =>
-                                    rescheduleLoser(e, ev.target.value)
-                                  }
-                                  title="직접 날짜 입력"
-                                />
-                              </div>
-                              {expandedLoserId === e.id &&
-                                renderLoserGrid(e)}
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                className="flex-1"
+                                disabled={busyId === e.id}
+                                onClick={() => setReschedTarget(e)}
+                                title="해당 직원의 근무달력을 열어 이동할 날짜 선택"
+                              >
+                                근무달력 열기
+                              </Button>
+                              <Input
+                                type="date"
+                                className="h-8 text-xs w-36"
+                                disabled={busyId === e.id}
+                                defaultValue={selectedDate ?? undefined}
+                                onChange={(ev) =>
+                                  rescheduleLoser(e, ev.target.value)
+                                }
+                                title="직접 날짜 입력"
+                              />
                             </div>
                           )}
                         </div>
@@ -908,6 +763,18 @@ export function AdminCalendar() {
           )}
         </DialogContent>
       </Dialog>
+
+      <LoserRescheduleCalendar
+        open={!!reschedTarget}
+        entry={reschedTarget}
+        originDate={selectedDate}
+        initialMonth={monthValue}
+        weekendHolidayTurns={weekendHolidayTurns}
+        onClose={() => setReschedTarget(null)}
+        onMoved={() => {
+          void fetchData();
+        }}
+      />
     </div>
   );
 }
