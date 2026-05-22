@@ -41,6 +41,13 @@ import { format } from "date-fns";
 
 const STORAGE_BUCKET = "documents";
 
+// 한 번에 불러오는 문서 수 (커서 기반 페이지네이션)
+const PAGE_SIZE = 20;
+
+// 목록 렌더에 필요한 문서 컬럼 (select("*") 대신 명시)
+const DOC_COLUMNS =
+  "id,title,description,file_url,file_name,is_required,expires_at,created_by,created_at,updated_at";
+
 // getPublicUrl 이 만든 공개 URL(.../object/public/documents/<경로>)에서
 // Storage 내부 경로만 추출한다. 추출 실패 시 null → 삭제를 건너뛴다.
 function storagePathFromUrl(url: string | null): string | null {
@@ -74,6 +81,10 @@ export function DocumentAdmin({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 페이지네이션: 마지막 문서 created_at(커서), 다음 페이지 존재 여부, 추가 로딩 중
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // 등록/수정 폼
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -91,41 +102,69 @@ export function DocumentAdmin({
   const [readsDoc, setReadsDoc] = useState<Document | null>(null);
   const [voteDoc, setVoteDoc] = useState<Document | null>(null);
 
-  const fetchList = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const { data, error: qErr } = await supabase
-        .from("documents")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (qErr) throw qErr;
-      const docs = (data as Document[]) ?? [];
-      setItems(docs);
+  // 한 페이지(PAGE_SIZE) 만큼 문서 + 해당 문서들의 선택지 수를 불러온다.
+  // reset=true 면 첫 페이지(커서 무시 + 목록 교체), false 면 다음 페이지(append).
+  const loadPage = useCallback(
+    async (reset: boolean) => {
+      if (reset) setIsLoading(true);
+      else setLoadingMore(true);
+      setError(null);
+      try {
+        // 다음 페이지 존재 판단을 위해 PAGE_SIZE+1 건 조회
+        let q = supabase
+          .from("documents")
+          .select(DOC_COLUMNS)
+          .order("created_at", { ascending: false })
+          .limit(PAGE_SIZE + 1);
+        if (!reset && cursor) q = q.lt("created_at", cursor);
+        const { data, error: qErr } = await q;
+        if (qErr) throw qErr;
 
-      // 각 문서의 선택지 수 — 투표 문서 배지/버튼 표시에 사용
-      const { data: optData, error: oErr } = await supabase
-        .from("document_options")
-        .select("document_id");
-      if (oErr) throw oErr;
-      const counts = new Map<string, number>();
-      for (const o of (optData as Pick<DocumentOption, "document_id">[]) ??
-        []) {
-        counts.set(o.document_id, (counts.get(o.document_id) ?? 0) + 1);
+        const fetched = (data as Document[]) ?? [];
+        const more = fetched.length > PAGE_SIZE;
+        const pageDocs = more ? fetched.slice(0, PAGE_SIZE) : fetched;
+        const pageIds = pageDocs.map((d) => d.id);
+
+        // 이번 페이지 문서들의 선택지 수만 한정 조회 (투표 문서 배지/버튼용)
+        const { data: optData, error: oErr } = pageIds.length
+          ? await supabase
+              .from("document_options")
+              .select("document_id")
+              .in("document_id", pageIds)
+          : { data: [], error: null };
+        if (oErr) throw oErr;
+
+        setItems((prev) => (reset ? pageDocs : [...prev, ...pageDocs]));
+        setOptionCounts((prev) => {
+          const counts = reset
+            ? new Map<string, number>()
+            : new Map(prev);
+          for (const o of (optData as Pick<DocumentOption, "document_id">[]) ??
+            []) {
+            counts.set(o.document_id, (counts.get(o.document_id) ?? 0) + 1);
+          }
+          return counts;
+        });
+
+        setHasMore(more);
+        setCursor(pageDocs.at(-1)?.created_at ?? cursor);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "문서를 불러오지 못했습니다."
+        );
+      } finally {
+        if (reset) setIsLoading(false);
+        else setLoadingMore(false);
       }
-      setOptionCounts(counts);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "문서를 불러오지 못했습니다."
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+    },
+    [cursor]
+  );
 
   useEffect(() => {
-    if (open) fetchList();
-  }, [open, fetchList]);
+    if (open) loadPage(true);
+    // 다이얼로그 열 때마다 첫 페이지부터 다시 로드
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!isAdmin || !employee) return null;
 
@@ -258,7 +297,7 @@ export function DocumentAdmin({
         if (optErr) throw optErr;
       }
 
-      await fetchList();
+      await loadPage(true);
       setIsFormOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "저장에 실패했습니다.");
@@ -292,7 +331,7 @@ export function DocumentAdmin({
         await supabase.storage.from(STORAGE_BUCKET).remove([path]);
       }
 
-      await fetchList();
+      await loadPage(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "삭제에 실패했습니다.");
     } finally {
@@ -424,6 +463,21 @@ export function DocumentAdmin({
                   </div>
                 );
               })
+            )}
+            {!isLoading && hasMore && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-center"
+                onClick={() => loadPage(false)}
+                disabled={loadingMore}
+              >
+                {loadingMore ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "더 보기"
+                )}
+              </Button>
             )}
           </div>
         </DialogContent>

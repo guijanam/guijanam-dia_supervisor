@@ -704,7 +704,7 @@ export function AdminDashboard() {
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "조회"}
         </Button>
         <Button size="sm" variant="outline" onClick={openAddModal}>
-          <Plus className="h-4 w-4" /> 신규 등록
+          <Plus className="h-4 w-4" /> 지근/지휴
         </Button>
         <Button
           size="sm"
@@ -738,13 +738,13 @@ export function AdminDashboard() {
           <Table className="min-w-max">
             <TableHeader>
               <TableRow>
-                <TableHead className="text-center">사번</TableHead>
                 <TableHead className="text-center">직책</TableHead>
                 <TableHead className="text-center">이름</TableHead>
                 <TableHead className="text-center">날짜</TableHead>
                 <TableHead className="text-center">원래 근무</TableHead>
                 <TableHead className="text-center">구분</TableHead>
                 <TableHead className="text-center">작업</TableHead>
+                <TableHead className="text-center">사번</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -760,9 +760,6 @@ export function AdminDashboard() {
               )}
               {filtered.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell className="text-center text-sm whitespace-nowrap">
-                    {row.employee?.employee_number}
-                  </TableCell>
                   <TableCell className="text-center text-sm whitespace-nowrap">
                     {row.employee?.staff_position}
                   </TableCell>
@@ -850,6 +847,9 @@ export function AdminDashboard() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
+                  </TableCell>
+                  <TableCell className="text-center text-sm whitespace-nowrap">
+                    {row.employee?.employee_number}
                   </TableCell>
                 </TableRow>
               ))}

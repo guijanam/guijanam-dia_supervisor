@@ -11,20 +11,29 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ImageViewer } from "@/components/image-viewer";
 import {
   FileText,
   Paperclip,
   Check,
   Loader2,
   ExternalLink,
+  Download,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, isImageFile } from "@/lib/utils";
 import { format } from "date-fns";
 
 interface DocumentBoardProps {
   // 미확인 문서 수를 부모(헤더 뱃지 등)로 전달
   onUnreadCountChange?: (count: number) => void;
 }
+
+// 한 번에 불러오는 문서 수 (커서 기반 페이지네이션)
+const PAGE_SIZE = 20;
+
+// 목록 렌더에 필요한 문서 컬럼 (select("*") 대신 명시)
+const DOC_COLUMNS =
+  "id,title,description,file_url,file_name,is_required,expires_at,created_by,created_at,updated_at";
 
 export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
   const { employee } = useAuth();
@@ -44,77 +53,122 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
   const [confirming, setConfirming] = useState<string | null>(null);
   // 투표 처리 중인 document_id
   const [voting, setVoting] = useState<string | null>(null);
+  // 전체화면 이미지 뷰어 (열려 있으면 src/name 보유)
+  const [viewer, setViewer] = useState<{ src: string; name: string } | null>(
+    null
+  );
+  // 페이지네이션: 마지막 문서 created_at(커서), 다음 페이지 존재 여부, 추가 로딩 중
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    if (!employee) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const { data: docData, error: dErr } = await supabase
-        .from("documents")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (dErr) throw dErr;
+  // 한 페이지(PAGE_SIZE) 만큼 문서 + 해당 문서들의 선택지/투표를 불러온다.
+  // reset=true 면 첫 페이지(커서 무시 + 상태 교체), false 면 다음 페이지(append).
+  const loadPage = useCallback(
+    async (reset: boolean) => {
+      if (!employee) return;
+      if (reset) setIsLoading(true);
+      else setLoadingMore(true);
+      setError(null);
+      try {
+        // 다음 페이지 존재 판단을 위해 PAGE_SIZE+1 건 조회
+        let q = supabase
+          .from("documents")
+          .select(DOC_COLUMNS)
+          .order("created_at", { ascending: false })
+          .limit(PAGE_SIZE + 1);
+        if (!reset && cursor) q = q.lt("created_at", cursor);
+        const { data: docData, error: dErr } = await q;
+        if (dErr) throw dErr;
 
-      // 본인 확인 기록
-      const { data: readData, error: rErr } = await supabase
-        .from("document_reads")
-        .select("document_id")
-        .eq("staff_id", employee.staff_id);
-      if (rErr) throw rErr;
+        const fetched = (docData as Document[]) ?? [];
+        const more = fetched.length > PAGE_SIZE;
+        const pageDocs = more ? fetched.slice(0, PAGE_SIZE) : fetched;
+        const pageIds = pageDocs.map((d) => d.id);
 
-      // 전체 투표 선택지
-      const { data: optData, error: oErr } = await supabase
-        .from("document_options")
-        .select("*")
-        .order("sort_order", { ascending: true });
-      if (oErr) throw oErr;
+        // 이번 페이지 문서들의 선택지 / 본인 투표만 한정 조회
+        const [optRes, voteRes] = await Promise.all([
+          pageIds.length
+            ? supabase
+                .from("document_options")
+                .select("*")
+                .in("document_id", pageIds)
+                .order("sort_order", { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
+          pageIds.length
+            ? supabase
+                .from("document_votes")
+                .select("document_id, option_id")
+                .eq("staff_id", employee.staff_id)
+                .in("document_id", pageIds)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+        if (optRes.error) throw optRes.error;
+        if (voteRes.error) throw voteRes.error;
 
-      // 본인 투표 기록
-      const { data: voteData, error: vErr } = await supabase
-        .from("document_votes")
-        .select("document_id, option_id")
-        .eq("staff_id", employee.staff_id);
-      if (vErr) throw vErr;
+        // 본인 확인 기록은 첫 페이지 로드 시에만 전체 조회 (1인당 적음)
+        let readSet: Set<string> | null = null;
+        if (reset) {
+          const { data: readData, error: rErr } = await supabase
+            .from("document_reads")
+            .select("document_id")
+            .eq("staff_id", employee.staff_id);
+          if (rErr) throw rErr;
+          readSet = new Set(
+            ((readData as Pick<DocumentRead, "document_id">[]) ?? []).map(
+              (r) => r.document_id
+            )
+          );
+        }
 
-      setDocs((docData as Document[]) ?? []);
-      setReadIds(
-        new Set(
-          ((readData as Pick<DocumentRead, "document_id">[]) ?? []).map(
-            (r) => r.document_id
-          )
-        )
-      );
+        // 상태 머지: reset 이면 교체, 아니면 기존에 append
+        setDocs((prev) => (reset ? pageDocs : [...prev, ...pageDocs]));
+        if (readSet) setReadIds(readSet);
 
-      const optMap = new Map<string, DocumentOption[]>();
-      for (const o of (optData as DocumentOption[]) ?? []) {
-        const arr = optMap.get(o.document_id) ?? [];
-        arr.push(o);
-        optMap.set(o.document_id, arr);
+        setOptionsByDoc((prev) => {
+          const optMap = reset
+            ? new Map<string, DocumentOption[]>()
+            : new Map(prev);
+          for (const o of (optRes.data as DocumentOption[]) ?? []) {
+            const arr = optMap.get(o.document_id) ?? [];
+            arr.push(o);
+            optMap.set(o.document_id, arr);
+          }
+          return optMap;
+        });
+
+        setMyVotes((prev) => {
+          const vMap = reset ? new Map<string, string>() : new Map(prev);
+          for (const v of (voteRes.data as Pick<
+            DocumentVote,
+            "document_id" | "option_id"
+          >[]) ?? []) {
+            vMap.set(v.document_id, v.option_id);
+          }
+          return vMap;
+        });
+
+        setHasMore(more);
+        setCursor(pageDocs.at(-1)?.created_at ?? cursor);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "문서를 불러오지 못했습니다."
+        );
+      } finally {
+        if (reset) setIsLoading(false);
+        else setLoadingMore(false);
       }
-      setOptionsByDoc(optMap);
+    },
+    [employee, cursor]
+  );
 
-      const vMap = new Map<string, string>();
-      for (const v of (voteData as Pick<
-        DocumentVote,
-        "document_id" | "option_id"
-      >[]) ?? []) {
-        vMap.set(v.document_id, v.option_id);
-      }
-      setMyVotes(vMap);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "문서를 불러오지 못했습니다."
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [employee]);
-
+  // 최초(또는 직원 변경 시) 첫 페이지 로드
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (!employee) return;
+    loadPage(true);
+    // loadPage 는 cursor 에도 의존하지만, 첫 로드는 employee 변경 시에만 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employee]);
 
   // 미확인 수 계산 후 부모에 통지
   useEffect(() => {
@@ -309,19 +363,49 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
               </div>
             )}
 
-            <div className="flex items-center gap-2">
-              {d.file_url && (
-                <Button variant="outline" size="xs" asChild>
-                  <a
-                    href={d.file_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+            <div className="flex items-center gap-2 flex-wrap">
+              {d.file_url && isImageFile(d.file_name) ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setViewer({
+                        src: d.file_url!,
+                        name: d.file_name ?? "image",
+                      })
+                    }
+                    title="이미지 크게 보기"
+                    className="rounded-md border overflow-hidden transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <Paperclip className="h-3.5 w-3.5 mr-1" />
-                    파일 열기
-                    <ExternalLink className="h-3 w-3 ml-1" />
-                  </a>
-                </Button>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={d.file_url}
+                      alt={d.file_name ?? "첨부 이미지"}
+                      loading="lazy"
+                      className="h-20 w-20 object-cover"
+                    />
+                  </button>
+                  <Button variant="outline" size="xs" asChild>
+                    <a href={d.file_url} download={d.file_name ?? undefined}>
+                      <Download className="h-3.5 w-3.5 mr-1" />
+                      다운로드
+                    </a>
+                  </Button>
+                </div>
+              ) : (
+                d.file_url && (
+                  <Button variant="outline" size="xs" asChild>
+                    <a
+                      href={d.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Paperclip className="h-3.5 w-3.5 mr-1" />
+                      파일 열기
+                      <ExternalLink className="h-3 w-3 ml-1" />
+                    </a>
+                  </Button>
+                )
               )}
 
               {isRead ? (
@@ -350,6 +434,31 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
           </div>
         );
       })}
+
+      {hasMore && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-center"
+          onClick={() => loadPage(false)}
+          disabled={loadingMore}
+        >
+          {loadingMore ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            "더 보기"
+          )}
+        </Button>
+      )}
+
+      {viewer && (
+        <ImageViewer
+          src={viewer.src}
+          fileName={viewer.name}
+          open={!!viewer}
+          onOpenChange={(o) => !o && setViewer(null)}
+        />
+      )}
     </div>
   );
 }
