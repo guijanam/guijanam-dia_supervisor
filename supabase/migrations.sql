@@ -185,3 +185,161 @@ alter table public.app_settings
 -- ============================================================
 alter table public.app_settings
   add column if not exists weekend_holiday_turns text not null default '31,32,33,34,35,36,37';
+
+-- ============================================================
+-- 12) 문서 열람 확인 시스템 -----------------------------------
+--  - 관리자가 공문/지침 문서를 업로드 → 직원이 열람 후 본인 확인(서명).
+--  - 관리자는 확인자/미확인자 명단을 조회만 가능(확인 기록 생성·수정 UI 없음).
+--  - document_reads insert 는 클라이언트(document-board.tsx)에서 로그인한
+--    직원 본인의 staff_id 로만 수행. update 정책 미생성 → 확인 기록은 불변.
+--  - 파일은 Supabase Storage 'documents' 버킷에 저장(대시보드에서 수동 생성,
+--    Public bucket = true). file_url 은 공개 URL, file_name 은 표시용 원본명.
+--  - file_url NULL 허용: 파일 없이 제목+설명만으로도 문서 게시 가능.
+--
+--  [보안 한계 — 의도된 결정] -----------------------------------
+--  이 앱은 Supabase Auth 미사용(이름+사번+PIN 으로 coworker_list 직접 조회,
+--  세션은 localStorage). 모든 DB 접근이 anon 키 단일이라 auth.uid()/auth.jwt()
+--  기반 RLS 를 쓸 수 없다(항상 NULL → 적용 시 앱 전체 정지).
+--  따라서 아래 정책은 special_schedules/announcements 와 동일하게
+--  using(true)/with check(true) 의 anon-permissive 방식이다.
+--  ⚠ 결과적으로 anon 키를 직접 사용하면 임의 staff_id 로 대리 서명하거나
+--    documents 를 임의 수정·삭제하는 것이 이론상 가능하다. 클라이언트 UI 는
+--    이를 막지만 DB 레벨 강제는 아니다. 내부망·소규모 운영 전제로 수용한다.
+--  진짜로 잠그려면: ① 서버 사이드 Route Handler + service_role 키로 staff_id
+--    를 서버가 결정, 또는 ② Supabase Auth 전면 도입. 둘 다 별도 작업.
+-- ============================================================
+create table if not exists public.documents (
+  id           uuid primary key default gen_random_uuid(),
+  title        text not null,
+  description  text,
+  file_url     text,
+  file_name    text,
+  is_required  boolean not null default false,
+  expires_at   timestamptz,
+  created_by   integer not null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists documents_created_at_idx
+  on public.documents (created_at desc);
+
+alter table public.documents enable row level security;
+drop policy if exists documents_read   on public.documents;
+drop policy if exists documents_insert on public.documents;
+drop policy if exists documents_update on public.documents;
+drop policy if exists documents_delete on public.documents;
+create policy documents_read   on public.documents for select using (true);
+create policy documents_insert on public.documents for insert with check (true);
+create policy documents_update on public.documents for update using (true) with check (true);
+create policy documents_delete on public.documents for delete using (true);
+
+-- 직원 열람 확인 기록 -----------------------------------------
+--  - (document_id, staff_id) 유니크 → 동일 직원 중복 확인 불가.
+--  - 문서 삭제 시 확인 기록도 cascade 삭제.
+--  - update 정책 없음: 한 번 확인하면 수정 불가(서명의 무결성).
+create table if not exists public.document_reads (
+  id           uuid primary key default gen_random_uuid(),
+  document_id  uuid not null references public.documents(id) on delete cascade,
+  staff_id     integer not null,
+  confirmed_at timestamptz not null default now(),
+  constraint document_reads_unique unique (document_id, staff_id)
+);
+
+create index if not exists document_reads_document_idx
+  on public.document_reads (document_id);
+create index if not exists document_reads_staff_idx
+  on public.document_reads (staff_id);
+
+alter table public.document_reads enable row level security;
+drop policy if exists document_reads_read   on public.document_reads;
+drop policy if exists document_reads_insert on public.document_reads;
+drop policy if exists document_reads_delete on public.document_reads;
+create policy document_reads_read   on public.document_reads for select using (true);
+create policy document_reads_insert on public.document_reads for insert with check (true);
+create policy document_reads_delete on public.document_reads for delete using (true);
+-- update 정책 미생성: 확인 기록은 불변(immutable).
+
+-- ------------------------------------------------------------
+-- 12-1) Storage 'documents' 버킷 RLS 정책 --------------------
+--  - 버킷을 Public 으로 만들어도 그것은 '읽기(다운로드)' 공개일 뿐,
+--    업로드(INSERT)/수정/삭제는 storage.objects RLS 로 별도 통제된다.
+--  - 기본 상태에서는 anon 의 업로드 정책이 없어
+--    "new row violates row-level security policy" 오류가 난다.
+--  - 이 앱은 anon 키 단일이므로 anon 에 업로드/삭제를 허용한다
+--    (테이블 정책들과 동일한 anon-permissive 수준).
+--  - bucket_id = 'documents' 로 범위를 한정해 다른 버킷에는 영향 없음.
+--  ※ 사전 조건: Storage 대시보드에서 'documents' 버킷을 먼저 생성할 것.
+-- ------------------------------------------------------------
+drop policy if exists documents_bucket_read   on storage.objects;
+drop policy if exists documents_bucket_insert on storage.objects;
+drop policy if exists documents_bucket_update on storage.objects;
+drop policy if exists documents_bucket_delete on storage.objects;
+
+create policy documents_bucket_read on storage.objects
+  for select using (bucket_id = 'documents');
+create policy documents_bucket_insert on storage.objects
+  for insert with check (bucket_id = 'documents');
+create policy documents_bucket_update on storage.objects
+  for update using (bucket_id = 'documents')
+  with check (bucket_id = 'documents');
+create policy documents_bucket_delete on storage.objects
+  for delete using (bucket_id = 'documents');
+
+-- ============================================================
+-- 13) 문서 투표 기능 -----------------------------------------
+--  - 문서에 선택지를 붙이면 '투표 문서', 안 붙이면 일반 확인 문서(선택적).
+--  - 단일 선택(직원당 1표), 마감일 전까지 변경 가능.
+--  - document_options: 문서별 투표 선택지. sort_order 로 표시 순서 고정.
+--  - document_votes: 직원의 투표. (document_id, staff_id) 유니크 → 1인 1표,
+--    재투표는 update 로 option_id 갱신(변경 가능 요구사항).
+--  - 보안 수준은 섹션 12 와 동일(anon-permissive). 한계도 동일하게 적용.
+-- ============================================================
+create table if not exists public.document_options (
+  id           uuid primary key default gen_random_uuid(),
+  document_id  uuid not null references public.documents(id) on delete cascade,
+  label        text not null,
+  sort_order   integer not null default 0,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists document_options_document_idx
+  on public.document_options (document_id);
+
+alter table public.document_options enable row level security;
+drop policy if exists document_options_read   on public.document_options;
+drop policy if exists document_options_insert on public.document_options;
+drop policy if exists document_options_update on public.document_options;
+drop policy if exists document_options_delete on public.document_options;
+create policy document_options_read   on public.document_options for select using (true);
+create policy document_options_insert on public.document_options for insert with check (true);
+create policy document_options_update on public.document_options for update using (true) with check (true);
+create policy document_options_delete on public.document_options for delete using (true);
+
+-- 직원 투표 기록 ----------------------------------------------
+--  - (document_id, staff_id) 유니크 → 1인 1표.
+--  - option_id 변경 가능 → update 정책 허용(섹션 12 의 document_reads 와 다른 점).
+--  - 문서/선택지 삭제 시 cascade.
+create table if not exists public.document_votes (
+  id           uuid primary key default gen_random_uuid(),
+  document_id  uuid not null references public.documents(id) on delete cascade,
+  option_id    uuid not null references public.document_options(id) on delete cascade,
+  staff_id     integer not null,
+  voted_at     timestamptz not null default now(),
+  constraint document_votes_unique unique (document_id, staff_id)
+);
+
+create index if not exists document_votes_document_idx
+  on public.document_votes (document_id);
+create index if not exists document_votes_option_idx
+  on public.document_votes (option_id);
+
+alter table public.document_votes enable row level security;
+drop policy if exists document_votes_read   on public.document_votes;
+drop policy if exists document_votes_insert on public.document_votes;
+drop policy if exists document_votes_update on public.document_votes;
+drop policy if exists document_votes_delete on public.document_votes;
+create policy document_votes_read   on public.document_votes for select using (true);
+create policy document_votes_insert on public.document_votes for insert with check (true);
+create policy document_votes_update on public.document_votes for update using (true) with check (true);
+create policy document_votes_delete on public.document_votes for delete using (true);

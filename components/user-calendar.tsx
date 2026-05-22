@@ -20,6 +20,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Loader2, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { DayModal } from "@/components/day-modal";
 import { AnnouncementBoard } from "@/components/announcement-board";
+import { DocumentBoard } from "@/components/document-board";
 import { ReferenceEditor } from "@/components/reference-editor";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -256,6 +257,7 @@ export function UserCalendar() {
       </header>
 
       <AnnouncementBoard />
+      <DocumentBoard />
 
       <div className="flex items-center justify-center gap-4 py-3">
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(-1)}>

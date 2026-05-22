@@ -103,3 +103,54 @@ export interface Announcement {
   created_at: string;
   updated_at: string;
 }
+
+// 문서: 관리자가 업로드, 직원이 열람 후 확인(서명).
+// file_url/file_name 은 Supabase Storage 'documents' 버킷 첨부(없으면 null).
+export interface Document {
+  id: string;
+  title: string;
+  description: string | null;
+  file_url: string | null;
+  file_name: string | null;
+  is_required: boolean;
+  expires_at: string | null;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// 문서 열람 확인 기록: 직원 본인의 staff_id 로만 생성(대리확인 불가).
+export interface DocumentRead {
+  id: string;
+  document_id: string;
+  staff_id: number;
+  confirmed_at: string;
+}
+
+// 관리자 확인자 명단 화면: document_reads 와 coworker_list 를 join 한 결과
+export interface DocumentReadWithEmployee extends DocumentRead {
+  employee: Pick<Employee, "staff_name" | "staff_position"> | null;
+}
+
+// 문서 투표 선택지: 선택지가 1개 이상 있으면 그 문서는 '투표 문서'.
+export interface DocumentOption {
+  id: string;
+  document_id: string;
+  label: string;
+  sort_order: number;
+  created_at: string;
+}
+
+// 직원 투표 기록: 1인 1표(단일 선택), 마감 전까지 option_id 변경 가능.
+export interface DocumentVote {
+  id: string;
+  document_id: string;
+  option_id: string;
+  staff_id: number;
+  voted_at: string;
+}
+
+// 관리자 투표 집계 화면: 투표 + 직원 정보 결합
+export interface DocumentVoteWithEmployee extends DocumentVote {
+  employee: Pick<Employee, "staff_name" | "staff_position"> | null;
+}

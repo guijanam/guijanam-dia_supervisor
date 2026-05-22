@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StaffListLink } from "@/components/staff-list-link";
 import { AnnouncementAdmin } from "@/components/announcement-admin";
+import { DocumentAdmin } from "@/components/document-admin";
 import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import {
   Dialog,
@@ -559,6 +560,7 @@ export function AdminDashboard() {
             <span className="font-bold">관리자</span>
           </div>
           <AnnouncementAdmin />
+          <DocumentAdmin />
           <span
             className={cn(
               "text-xs rounded px-1.5 py-0.5 border",
