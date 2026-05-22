@@ -3,7 +3,7 @@
 import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const STAFF_EDIT_URL = "https://coworker-edit.vercel.app/admin/login";
+export const STAFF_EDIT_URL = "https://coworker-edit.vercel.app/admin/login";
 
 export function StaffListLink() {
   return (

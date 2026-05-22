@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  type ComponentType,
+} from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
@@ -30,7 +36,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { StaffListLink } from "@/components/staff-list-link";
+import { STAFF_EDIT_URL } from "@/components/staff-list-link";
 import { AnnouncementAdmin } from "@/components/announcement-admin";
 import { DocumentAdmin } from "@/components/document-admin";
 import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
@@ -52,12 +58,37 @@ import {
   Plus,
   KeyRound,
   CalendarCog,
+  Megaphone,
+  FileText,
+  Users,
 } from "lucide-react";
 
 interface Row extends SpecialScheduleWithEmployee {
   _draftDate: string;
   _draftType: RecordType;
   regularTurn: string | null;
+}
+
+function SidebarItem({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
 }
 
 export function AdminDashboard() {
@@ -89,6 +120,10 @@ export function AdminDashboard() {
   const [addType, setAddType] = useState<RecordType>("지근");
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // 사이드바에서 여는 공지/문서 모달 상태
+  const [announceOpen, setAnnounceOpen] = useState(false);
+  const [documentOpen, setDocumentOpen] = useState(false);
 
   // PIN 초기화 모달 상태
   const [pinOpen, setPinOpen] = useState(false);
@@ -559,8 +594,6 @@ export function AdminDashboard() {
           <div className="text-sm">
             <span className="font-bold">관리자</span>
           </div>
-          <AnnouncementAdmin />
-          <DocumentAdmin />
           <span
             className={cn(
               "text-xs rounded px-1.5 py-0.5 border",
@@ -600,6 +633,41 @@ export function AdminDashboard() {
         </div>
       </header>
 
+      <div className="flex flex-1 min-h-0">
+        <aside className="w-12 sm:w-48 shrink-0 border-r p-2 flex flex-col gap-1 overflow-y-auto">
+          <p className="hidden sm:block px-3 pt-1 pb-2 text-xs font-semibold text-muted-foreground">
+            대시보드
+          </p>
+          <SidebarItem
+            icon={Megaphone}
+            label="공지"
+            onClick={() => setAnnounceOpen(true)}
+          />
+          <SidebarItem
+            icon={FileText}
+            label="문서"
+            onClick={() => setDocumentOpen(true)}
+          />
+          <SidebarItem
+            icon={KeyRound}
+            label="PIN 초기화"
+            onClick={openPinModal}
+          />
+          <SidebarItem
+            icon={CalendarCog}
+            label="기준근무 수정"
+            onClick={openRefModal}
+          />
+          <SidebarItem
+            icon={Users}
+            label="직원명단"
+            onClick={() =>
+              window.open(STAFF_EDIT_URL, "_blank", "noopener")
+            }
+          />
+        </aside>
+
+        <div className="flex flex-1 flex-col min-w-0">
       <div className="flex items-center gap-2 p-3 flex-wrap">
         <div className="flex items-center gap-1">
           <Button
@@ -638,12 +706,6 @@ export function AdminDashboard() {
         <Button size="sm" variant="outline" onClick={openAddModal}>
           <Plus className="h-4 w-4" /> 신규 등록
         </Button>
-        <Button size="sm" variant="outline" onClick={openPinModal}>
-          <KeyRound className="h-4 w-4" /> PIN 초기화
-        </Button>
-        <Button size="sm" variant="outline" onClick={openRefModal}>
-          <CalendarCog className="h-4 w-4" /> 기준근무 수정
-        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -652,7 +714,6 @@ export function AdminDashboard() {
         >
           <Download className="h-4 w-4" /> Excel 다운로드
         </Button>
-        <StaffListLink />
         <Button
           size="sm"
           variant="destructive"
@@ -794,6 +855,8 @@ export function AdminDashboard() {
               ))}
             </TableBody>
           </Table>
+        </div>
+      </div>
         </div>
       </div>
 
@@ -1149,6 +1212,17 @@ export function AdminDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AnnouncementAdmin
+        open={announceOpen}
+        onOpenChange={setAnnounceOpen}
+        hideTrigger
+      />
+      <DocumentAdmin
+        open={documentOpen}
+        onOpenChange={setDocumentOpen}
+        hideTrigger
+      />
     </div>
   );
 }

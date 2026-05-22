@@ -18,10 +18,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Megaphone, Pencil, Trash2, Loader2, Plus } from "lucide-react";
 import { format } from "date-fns";
 
-export function AnnouncementAdmin() {
+interface Props {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+}
+
+export function AnnouncementAdmin({
+  open: openProp,
+  onOpenChange,
+  hideTrigger,
+}: Props = {}) {
   const { employee, isAdmin } = useAuth();
 
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
   const [items, setItems] = useState<Announcement[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,15 +137,17 @@ export function AnnouncementAdmin() {
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="xs"
-        onClick={() => setOpen(true)}
-        title="공지사항 관리"
-      >
-        <Megaphone className="h-3.5 w-3.5 mr-1" />
-        공지
-      </Button>
+      {!hideTrigger && (
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => setOpen(true)}
+          title="공지사항 관리"
+        >
+          <Megaphone className="h-3.5 w-3.5 mr-1" />
+          공지
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

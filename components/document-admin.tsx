@@ -51,10 +51,22 @@ function storagePathFromUrl(url: string | null): string | null {
   return decodeURIComponent(url.slice(idx + marker.length));
 }
 
-export function DocumentAdmin() {
+interface Props {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+}
+
+export function DocumentAdmin({
+  open: openProp,
+  onOpenChange,
+  hideTrigger,
+}: Props = {}) {
   const { employee, isAdmin } = useAuth();
 
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
   const [items, setItems] = useState<Document[]>([]);
   // document_id → 선택지 수 (투표 문서 여부 판별)
   const [optionCounts, setOptionCounts] = useState<Map<string, number>>(
@@ -290,15 +302,17 @@ export function DocumentAdmin() {
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="xs"
-        onClick={() => setOpen(true)}
-        title="문서 관리"
-      >
-        <FileText className="h-3.5 w-3.5 mr-1" />
-        문서
-      </Button>
+      {!hideTrigger && (
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => setOpen(true)}
+          title="문서 관리"
+        >
+          <FileText className="h-3.5 w-3.5 mr-1" />
+          문서
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
