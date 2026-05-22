@@ -25,6 +25,8 @@ import { ReferenceEditor } from "@/components/reference-editor";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
+type UserView = "notice" | "calendar";
+
 export interface DayEntry {
   id: string;
   staff_id: number;
@@ -36,6 +38,7 @@ export interface DayEntry {
 
 export function UserCalendar() {
   const { employee, logout } = useAuth();
+  const [view, setView] = useState<UserView>("calendar");
   const [monthValue, setMonthValue] = useState(getTodayMonthStr());
   const [regularMap, setRegularMap] = useState<Map<string, string>>(new Map());
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialSchedule>>(
@@ -256,10 +259,18 @@ export function UserCalendar() {
         </div>
       </header>
 
-      <AnnouncementBoard />
-      <DocumentBoard />
+      <div className="flex-1 pb-14">
+        {view === "notice" && <DocumentBoard />}
 
-      <div className="flex items-center justify-center gap-4 py-3">
+        {view === "calendar" && (
+          <>
+            <AnnouncementBoard />
+
+            <p className="mx-2 mt-3 rounded border border-blue-300 bg-blue-50 px-3 py-2 text-center text-xs font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+              교번 순서가 다르면 오른쪽 상단의 *근무순서 수정*을 통해 수정하시면 됩니다.
+            </p>
+
+            <div className="flex items-center justify-center gap-4 py-3">
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(-1)}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -300,7 +311,7 @@ export function UserCalendar() {
         </p>
       )}
 
-      <div className="relative flex-1 px-2 pb-6">
+      <div className="relative px-2 pb-6">
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/60 z-10">
             <Loader2 className="h-6 w-6 animate-spin" />
@@ -380,6 +391,31 @@ export function UserCalendar() {
           })}
         </div>
       </div>
+          </>
+        )}
+      </div>
+
+      <nav className="fixed bottom-0 left-0 w-full z-50 flex border-t bg-background">
+        {(
+          [
+            { label: "근무 달력", value: "calendar" },
+            { label: "문서", value: "notice" },
+          ] as { label: string; value: UserView }[]
+        ).map((tab) => (
+          <button
+            key={tab.value}
+            className={cn(
+              "flex-1 py-3 font-bold text-sm transition-colors",
+              view === tab.value
+                ? "border-b-2 border-primary bg-accent"
+                : "text-muted-foreground"
+            )}
+            onClick={() => setView(tab.value)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
 
       <DayModal
         employee={employee}
