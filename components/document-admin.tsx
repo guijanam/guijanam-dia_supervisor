@@ -58,22 +58,15 @@ function storagePathFromUrl(url: string | null): string | null {
   return decodeURIComponent(url.slice(idx + marker.length));
 }
 
-interface Props {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  hideTrigger?: boolean;
+interface ContentProps {
+  // 다이얼로그 안에서 렌더될 때 true — 목록 높이를 제한한다.
+  inDialog?: boolean;
 }
 
-export function DocumentAdmin({
-  open: openProp,
-  onOpenChange,
-  hideTrigger,
-}: Props = {}) {
+// 문서 관리 본문 — 다이얼로그(DocumentAdmin)와 페이지 패널에서 공용으로 쓴다.
+export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
   const { employee, isAdmin } = useAuth();
 
-  const [openState, setOpenState] = useState(false);
-  const open = openProp ?? openState;
-  const setOpen = onOpenChange ?? setOpenState;
   const [items, setItems] = useState<Document[]>([]);
   // document_id → 선택지 수 (투표 문서 여부 판별)
   const [optionCounts, setOptionCounts] = useState<Map<string, number>>(
@@ -161,10 +154,10 @@ export function DocumentAdmin({
   );
 
   useEffect(() => {
-    if (open) loadPage(true);
-    // 다이얼로그 열 때마다 첫 페이지부터 다시 로드
+    loadPage(true);
+    // 마운트 시 첫 페이지부터 로드
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, []);
 
   if (!isAdmin || !employee) return null;
 
@@ -341,36 +334,23 @@ export function DocumentAdmin({
 
   return (
     <>
-      {!hideTrigger && (
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => setOpen(true)}
-          title="문서 관리"
-        >
-          <FileText className="h-3.5 w-3.5 mr-1" />
-          문서
-        </Button>
+      {error && (
+        <p className="text-destructive text-sm font-medium">{error}</p>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>문서 관리</DialogTitle>
-            <DialogDescription>
-              직원에게 배포할 문서를 등록하고, 열람 확인·투표 현황을 조회합니다.
-            </DialogDescription>
-          </DialogHeader>
+      <Button
+        onClick={openCreate}
+        className={inDialog ? "w-full" : "w-full max-w-sm"}
+      >
+        <Plus className="h-4 w-4 mr-1" />새 문서
+      </Button>
 
-          {error && (
-            <p className="text-destructive text-sm font-medium">{error}</p>
-          )}
-
-          <Button onClick={openCreate} className="w-full">
-            <Plus className="h-4 w-4 mr-1" />새 문서
-          </Button>
-
-          <div className="flex flex-col gap-2 max-h-[50vh] overflow-auto">
+      <div
+        className={cn(
+          "flex flex-col gap-2 overflow-auto",
+          inDialog ? "max-h-[50vh]" : "flex-1"
+        )}
+      >
             {isLoading ? (
               <>
                 <Skeleton className="h-16 w-full" />
@@ -480,8 +460,6 @@ export function DocumentAdmin({
               </Button>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
 
       {/* 등록/수정 폼 */}
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
@@ -639,6 +617,57 @@ export function DocumentAdmin({
           onClose={() => setVoteDoc(null)}
         />
       )}
+    </>
+  );
+}
+
+interface Props {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+}
+
+// 문서 관리 다이얼로그 래퍼 — 버튼+팝업 형태로 쓸 때 사용.
+export function DocumentAdmin({
+  open: openProp,
+  onOpenChange,
+  hideTrigger,
+}: Props = {}) {
+  const { employee, isAdmin } = useAuth();
+
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
+
+  if (!isAdmin || !employee) return null;
+
+  return (
+    <>
+      {!hideTrigger && (
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => setOpen(true)}
+          title="문서 관리"
+        >
+          <FileText className="h-3.5 w-3.5 mr-1" />
+          문서
+        </Button>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>문서 관리</DialogTitle>
+            <DialogDescription>
+              직원에게 배포할 문서를 등록하고, 열람 확인·투표 현황을 조회합니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* 다이얼로그가 열릴 때만 마운트되어 fetch 가 실행된다 */}
+          {open && <DocumentAdminContent inDialog />}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

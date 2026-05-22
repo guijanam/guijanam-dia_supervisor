@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type { Announcement } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -18,22 +19,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Megaphone, Pencil, Trash2, Loader2, Plus } from "lucide-react";
 import { format } from "date-fns";
 
-interface Props {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  hideTrigger?: boolean;
+interface ContentProps {
+  // 다이얼로그 안에서 렌더될 때 true — 목록 높이를 제한한다.
+  inDialog?: boolean;
 }
 
-export function AnnouncementAdmin({
-  open: openProp,
-  onOpenChange,
-  hideTrigger,
-}: Props = {}) {
+// 공지 관리 본문 — 다이얼로그(AnnouncementAdmin)와 페이지 패널에서 공용으로 쓴다.
+export function AnnouncementAdminContent({ inDialog }: ContentProps = {}) {
   const { employee, isAdmin } = useAuth();
 
-  const [openState, setOpenState] = useState(false);
-  const open = openProp ?? openState;
-  const setOpen = onOpenChange ?? setOpenState;
   const [items, setItems] = useState<Announcement[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,8 +56,8 @@ export function AnnouncementAdmin({
   }, []);
 
   useEffect(() => {
-    if (open) fetchList();
-  }, [open, fetchList]);
+    fetchList();
+  }, [fetchList]);
 
   if (!isAdmin || !employee) return null;
 
@@ -137,84 +131,66 @@ export function AnnouncementAdmin({
 
   return (
     <>
-      {!hideTrigger && (
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => setOpen(true)}
-          title="공지사항 관리"
-        >
-          <Megaphone className="h-3.5 w-3.5 mr-1" />
-          공지
-        </Button>
+      {error && (
+        <p className="text-destructive text-sm font-medium">{error}</p>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>공지사항 관리</DialogTitle>
-            <DialogDescription>
-              직원 캘린더 하단에 표시되는 공지를 작성·수정·삭제합니다.
-            </DialogDescription>
-          </DialogHeader>
+      <Button onClick={openCreate} className={inDialog ? "w-full" : "w-full max-w-sm"}>
+        <Plus className="h-4 w-4 mr-1" />새 공지
+      </Button>
 
-          {error && (
-            <p className="text-destructive text-sm font-medium">{error}</p>
-          )}
-
-          <Button onClick={openCreate} className="w-full">
-            <Plus className="h-4 w-4 mr-1" />새 공지
-          </Button>
-
-          <div className="flex flex-col gap-2 max-h-[50vh] overflow-auto">
-            {isLoading ? (
-              <>
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-              </>
-            ) : items.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">
-                등록된 공지가 없습니다.
-              </p>
-            ) : (
-              items.map((a) => (
-                <div
-                  key={a.id}
-                  className="flex items-start justify-between gap-2 rounded-md border p-3"
+      <div
+        className={cn(
+          "flex flex-col gap-2 overflow-auto",
+          inDialog ? "max-h-[50vh]" : "flex-1"
+        )}
+      >
+        {isLoading ? (
+          <>
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+          </>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            등록된 공지가 없습니다.
+          </p>
+        ) : (
+          items.map((a) => (
+            <div
+              key={a.id}
+              className="flex items-start justify-between gap-2 rounded-md border p-3"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold truncate">{a.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {format(new Date(a.updated_at), "yyyy.MM.dd HH:mm")}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => openEdit(a)}
+                  disabled={isSaving}
+                  title="수정"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold truncate">{a.title}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {format(new Date(a.updated_at), "yyyy.MM.dd HH:mm")}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => openEdit(a)}
-                      disabled={isSaving}
-                      title="수정"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => remove(a)}
-                      disabled={isSaving}
-                      title="삭제"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => remove(a)}
+                  disabled={isSaving}
+                  title="삭제"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
 
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
         <DialogContent>
@@ -255,13 +231,60 @@ export function AnnouncementAdmin({
               onClick={save}
               disabled={isSaving || !title.trim() || !content.trim()}
             >
-              {isSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "저장"
-              )}
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+interface Props {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+}
+
+// 공지 관리 다이얼로그 래퍼 — admin-calendar 등에서 버튼+팝업으로 쓴다.
+export function AnnouncementAdmin({
+  open: openProp,
+  onOpenChange,
+  hideTrigger,
+}: Props = {}) {
+  const { employee, isAdmin } = useAuth();
+
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
+
+  if (!isAdmin || !employee) return null;
+
+  return (
+    <>
+      {!hideTrigger && (
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => setOpen(true)}
+          title="공지사항 관리"
+        >
+          <Megaphone className="h-3.5 w-3.5 mr-1" />
+          공지
+        </Button>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>공지사항 관리</DialogTitle>
+            <DialogDescription>
+              직원 캘린더 하단에 표시되는 공지를 작성·수정·삭제합니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* 다이얼로그가 열릴 때만 마운트되어 fetch 가 실행된다 */}
+          {open && <AnnouncementAdminContent inDialog />}
         </DialogContent>
       </Dialog>
     </>
