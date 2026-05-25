@@ -34,7 +34,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
-  ExternalLink,
+  X,
 } from "lucide-react";
 import {
   Dialog,
@@ -44,6 +44,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { LoserRescheduleCalendar } from "@/components/loser-reschedule-calendar";
+import { AdminEmployeeCalendarView } from "@/components/admin-employee-calendar-view";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -94,6 +95,14 @@ export function AdminCalendar() {
   const [addType, setAddType] = useState<RecordType>("지근");
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // 직원 검색 → 개인 뷰 전환 상태
+  const [staffSearch, setStaffSearch] = useState("");
+  const [viewStaff, setViewStaff] = useState<{
+    staff_id: number;
+    staff_name: string;
+    staff_position: string;
+  } | null>(null);
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
 
@@ -255,10 +264,8 @@ export function AdminCalendar() {
     setAddError(null);
   }, [selectedDate]);
 
-  // 모달이 처음 열릴 때 직원 목록 lazy-load (세션당 한 번만).
-  // ref 가드로 StrictMode/재렌더에 의한 중복 호출을 막는다.
+  // 직원 목록 1회 로드. 모달 인라인 등록 폼과 직원 검색바가 함께 사용한다.
   useEffect(() => {
-    if (!selectedDate) return;
     if (empFetchStarted.current) return;
     empFetchStarted.current = true;
     setEmpLoading(true);
@@ -285,7 +292,7 @@ export function AdminCalendar() {
         setEmpLoading(false);
       }
     })();
-  }, [selectedDate]);
+  }, []);
 
   const shiftMonth = (delta: number) => {
     const [year, month] = monthValue.split("-").map(Number);
@@ -473,17 +480,78 @@ export function AdminCalendar() {
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(1)}>
           <ChevronRight className="h-4 w-4" />
         </Button>
-        <a
-          href="https://dongseoung-month-cowoker.vercel.app"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="ml-2"
-        >
-          <Button variant="outline" size="sm" className="gap-1">
-            <ExternalLink className="h-4 w-4" />
-            <span className="text-xs">동승무 월근무</span>
-          </Button>
-        </a>
+      </div>
+
+      <div className="px-3 pb-3">
+        <div className="relative">
+          <Input
+            value={staffSearch}
+            onChange={(ev) => setStaffSearch(ev.target.value)}
+            placeholder={
+              viewStaff
+                ? `${viewStaff.staff_name}(${viewStaff.staff_position}) 화면 보는 중 — 다른 직원 검색`
+                : "직원 이름으로 검색해 개인 캘린더 보기"
+            }
+            className="h-9 text-sm pr-9"
+          />
+          {viewStaff && (
+            <button
+              type="button"
+              onClick={() => {
+                setViewStaff(null);
+                setStaffSearch("");
+              }}
+              className="absolute right-1 top-1 h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
+              title="전체 보기로 복귀"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        {staffSearch.trim() && (
+          <div className="mt-1 max-h-56 overflow-auto rounded-md border bg-popover shadow-sm">
+            {empLoading ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                직원 목록 로딩 중...
+              </div>
+            ) : (
+              (() => {
+                const q = staffSearch.trim().toLowerCase();
+                const matches = empList
+                  .filter((e) => e.staff_name.toLowerCase().includes(q))
+                  .slice(0, 12);
+                if (matches.length === 0) {
+                  return (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      일치하는 직원이 없습니다.
+                    </div>
+                  );
+                }
+                return matches.map((e) => (
+                  <button
+                    key={e.staff_id}
+                    type="button"
+                    onClick={() => {
+                      setViewStaff({
+                        staff_id: e.staff_id,
+                        staff_name: e.staff_name,
+                        staff_position: e.staff_position,
+                      });
+                      setStaffSearch("");
+                    }}
+                    className="block w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                  >
+                    {e.staff_name}
+                    <span className="text-xs text-muted-foreground">
+                      {" "}
+                      ({e.staff_position})
+                    </span>
+                  </button>
+                ));
+              })()
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
@@ -492,6 +560,13 @@ export function AdminCalendar() {
         </p>
       )}
 
+      {viewStaff ? (
+        <AdminEmployeeCalendarView
+          staff={viewStaff}
+          monthValue={monthValue}
+        />
+      ) : (
+      <>
       <div className="relative flex-1 px-2 pb-6">
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/60 z-10">
@@ -763,6 +838,8 @@ export function AdminCalendar() {
           )}
         </DialogContent>
       </Dialog>
+      </>
+      )}
 
       <LoserRescheduleCalendar
         open={!!reschedTarget}
