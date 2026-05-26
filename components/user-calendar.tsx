@@ -267,7 +267,7 @@ export function UserCalendar() {
             <AnnouncementBoard />
 
             <p className="mx-2 mt-3 rounded border border-blue-300 bg-blue-50 px-3 py-2 text-center text-xs font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-              교번 순서가 다르면 오른쪽 상단의 *근무순서 수정*을 통해 수정하시면 됩니다.
+              교번 순서가 다르면 오른쪽 상단의 *나의정보 수정*을 통해 수정하시면 됩니다.
             </p>
 
             <div className="flex items-center justify-center gap-4 py-3">

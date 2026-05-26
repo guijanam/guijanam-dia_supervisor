@@ -231,6 +231,7 @@ export function AdminEmployeeCalendarView({
     role: "user",
     reference_date: null,
     reference_shift: null,
+    device_id: null,
   };
 
   return (

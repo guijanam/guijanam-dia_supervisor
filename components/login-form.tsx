@@ -53,7 +53,7 @@ export function LoginForm() {
       const { data, error: queryError } = await supabase
         .from("coworker_list")
         .select(
-          "staff_id, staff_name, staff_position, employee_number, phone_number, role, pin_hash, reference_date, reference_shift"
+          "staff_id, staff_name, staff_position, employee_number, phone_number, role, pin_hash, reference_date, reference_shift, device_id"
         )
         .eq("staff_name", trimmedName)
         .eq("employee_number", trimmedEmp)

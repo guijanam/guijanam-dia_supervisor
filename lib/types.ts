@@ -27,6 +27,8 @@ export interface Employee {
   // 근무순서 RPC 계산의 기준점(앵커). 잘못되면 본인 근무표 전체가 어긋남.
   reference_date: string | null;
   reference_shift: string | null;
+  // 기기 식별값(check_device_vip RPC 에서 VIP 여부 판별에 사용). unique, NULL 허용.
+  device_id: string | null;
 }
 
 export interface SpecialSchedule {

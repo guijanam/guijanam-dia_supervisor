@@ -15,14 +15,17 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, CalendarCog } from "lucide-react";
 
-// 직원 본인이 자신의 기준일/기준 근무번호를 수정한다.
-// 이 값은 근무순서 RPC 계산의 앵커라, 저장 전 확인 단계를 강제한다.
+// 직원 본인이 자신의 기준일/기준 근무번호 + 전화번호/기기ID 를 수정한다.
+// 기준일/기준 근무번호는 근무순서 RPC 계산의 앵커라, 그 값이 바뀐 경우에만
+// 저장 전 확인 단계를 강제한다.
 export function ReferenceEditor() {
   const { employee, login } = useAuth();
   const [open, setOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [refDate, setRefDate] = useState("");
   const [refShift, setRefShift] = useState("");
+  const [phone, setPhone] = useState("");
+  const [deviceId, setDeviceId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +35,18 @@ export function ReferenceEditor() {
     setError(null);
     setRefDate(employee.reference_date ?? "");
     setRefShift(employee.reference_shift ?? "");
+    setPhone(employee.phone_number ?? "");
+    setDeviceId(employee.device_id ?? "");
     setOpen(true);
+  };
+
+  const refChanged = () => {
+    const nextDate = refDate.trim() || null;
+    const nextShift = refShift.trim() || null;
+    return (
+      nextDate !== (employee.reference_date ?? null) ||
+      nextShift !== (employee.reference_shift ?? null)
+    );
   };
 
   const requestSave = () => {
@@ -49,7 +63,12 @@ export function ReferenceEditor() {
       );
       return;
     }
-    setConfirmOpen(true);
+    // 기준일/기준 근무번호가 실제로 변경된 경우에만 빨간 확인 다이얼로그.
+    if (refChanged()) {
+      setConfirmOpen(true);
+    } else {
+      void doSave();
+    }
   };
 
   const doSave = async () => {
@@ -57,21 +76,39 @@ export function ReferenceEditor() {
     setError(null);
     const nextDate = refDate.trim() || null;
     const nextShift = refShift.trim() || null;
+    const nextPhone = phone.trim() || null;
+    const nextDevice = deviceId.trim() || null;
     try {
       const { error: upErr } = await supabase
         .from("coworker_list")
-        .update({ reference_date: nextDate, reference_shift: nextShift })
+        .update({
+          reference_date: nextDate,
+          reference_shift: nextShift,
+          phone_number: nextPhone,
+          device_id: nextDevice,
+        })
         .eq("staff_id", employee.staff_id);
       if (upErr) throw upErr;
       login({
         ...employee,
         reference_date: nextDate,
         reference_shift: nextShift,
+        phone_number: nextPhone,
+        device_id: nextDevice,
       });
       setConfirmOpen(false);
       setOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "저장에 실패했습니다.");
+      // device_id unique 위반(23505) 은 친화적 메시지로 변환.
+      const code =
+        typeof err === "object" && err !== null && "code" in err
+          ? String((err as { code?: unknown }).code ?? "")
+          : "";
+      if (code === "23505") {
+        setError("이미 다른 계정에 등록된 기기 ID 입니다.");
+      } else {
+        setError(err instanceof Error ? err.message : "저장에 실패했습니다.");
+      }
       setConfirmOpen(false);
     } finally {
       setBusy(false);
@@ -81,12 +118,12 @@ export function ReferenceEditor() {
   return (
     <>
       <div className="flex items-center gap-1">
-        <span className="text-muted-foreground text-xs">근무순서 수정</span>
+        <span className="text-muted-foreground text-xs">나의정보 수정</span>
         <Button
           variant="ghost"
           size="icon-sm"
           onClick={openModal}
-          title="기준 근무 수정"
+          title="나의정보 수정"
         >
           <CalendarCog className="h-4 w-4" />
         </Button>
@@ -95,7 +132,7 @@ export function ReferenceEditor() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>기준 근무 수정</DialogTitle>
+            <DialogTitle>나의정보 수정</DialogTitle>
             <DialogDescription>
               기준일과 기준 근무번호는 근무표 계산의 기준점입니다. 잘못 바꾸면
               본인 근무표 전체가 어긋나니 신중히 입력하세요.
@@ -130,8 +167,32 @@ export function ReferenceEditor() {
               />
             </label>
 
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">전화번호</span>
+              <Input
+                type="tel"
+                value={phone}
+                disabled={busy}
+                placeholder="010-0000-0000"
+                onChange={(e) => setPhone(e.target.value)}
+                className="h-9"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">기기 ID</span>
+              <Input
+                type="text"
+                value={deviceId}
+                disabled={busy}
+                placeholder="기기 식별값"
+                onChange={(e) => setDeviceId(e.target.value)}
+                className="h-9"
+              />
+            </label>
+
             <Button onClick={requestSave} disabled={busy} className="w-full">
-              저장
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
             </Button>
           </div>
         </DialogContent>

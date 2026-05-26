@@ -343,3 +343,21 @@ create policy document_votes_read   on public.document_votes for select using (t
 create policy document_votes_insert on public.document_votes for insert with check (true);
 create policy document_votes_update on public.document_votes for update using (true) with check (true);
 create policy document_votes_delete on public.document_votes for delete using (true);
+
+-- ============================================================
+-- 14) 기기 식별(device_id) -----------------------------------
+--  - 본인 기기 식별을 위한 컬럼. NULL 허용, 값이 있을 때만 unique.
+--  - check_device_vip(p_device_id) RPC: 해당 device_id 가 coworker_list 에
+--    등록되어 있으면 true(=VIP/등록 기기) 반환. anon/authenticated 실행 가능.
+--  - 사용자는 '나의정보 수정' 모달(reference-editor.tsx) 에서 직접 편집.
+-- ============================================================
+ALTER TABLE coworker_list ADD COLUMN IF NOT EXISTS device_id TEXT DEFAULT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS coworker_list_device_id_unique
+ON coworker_list (device_id) WHERE device_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION check_device_vip(p_device_id TEXT)
+RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM coworker_list WHERE device_id = p_device_id);
+$$;
+GRANT EXECUTE ON FUNCTION check_device_vip(TEXT) TO anon, authenticated;
