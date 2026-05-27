@@ -152,13 +152,13 @@ export function AdminDashboard() {
           />
           <SidebarItem
             icon={CalendarCog}
-            label="기준근무 수정"
+            label="교번순서 수정"
             active={page === "reference"}
             onClick={() => setPage("reference")}
           />
           <SidebarItem
             icon={Users}
-            label="직원명단"
+            label="직원명단 관리"
             onClick={() => window.open(STAFF_EDIT_URL, "_blank", "noopener")}
           />
         </aside>
