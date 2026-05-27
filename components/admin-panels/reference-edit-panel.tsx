@@ -200,7 +200,7 @@ export function ReferenceEditPanel() {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>기준 근무 수정</DialogTitle>
+            <DialogTitle>교번순서 수정</DialogTitle>
             <DialogDescription>
               <span className="font-semibold text-foreground">
                 {list.find((e) => e.staff_id === selectedId)?.staff_name}
