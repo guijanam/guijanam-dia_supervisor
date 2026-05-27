@@ -28,6 +28,7 @@ export function ReferenceEditPanel() {
   const [listLoading, setListLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [refDate, setRefDate] = useState("");
   const [refShift, setRefShift] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -70,6 +71,7 @@ export function ReferenceEditPanel() {
     setRefShift(emp.reference_shift ?? "");
     setError(null);
     setDone(null);
+    setEditOpen(true);
   };
 
   const requestSave = () => {
@@ -111,6 +113,7 @@ export function ReferenceEditPanel() {
       const name = list.find((e) => e.staff_id === selectedId)?.staff_name ?? "";
       setDone(`${name}님의 기준 근무 정보가 저장되었습니다.`);
       setConfirmOpen(false);
+      setEditOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "저장 실패");
       setConfirmOpen(false);
@@ -134,9 +137,6 @@ export function ReferenceEditPanel() {
         </p>
       </div>
 
-      {error && (
-        <p className="text-destructive text-sm font-medium">{error}</p>
-      )}
       {done && (
         <p className="text-sm font-medium text-green-600 dark:text-green-400">
           {done}
@@ -191,35 +191,70 @@ export function ReferenceEditPanel() {
           ))}
       </div>
 
-      {selectedId != null && (
-        <div className="flex flex-col gap-3 border-t pt-3 max-w-sm">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">기준일</span>
-            <Input
-              type="date"
-              value={refDate}
-              disabled={busy}
-              onChange={(e) => setRefDate(e.target.value)}
-              className="h-9"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">기준 근무번호</span>
-            <Input
-              type="text"
-              value={refShift}
-              disabled={busy}
-              placeholder="예) 56, 52~, 휴22, 대11~"
-              onChange={(e) => setRefShift(e.target.value)}
-              className="h-9"
-            />
-          </label>
-          <Button onClick={requestSave} disabled={busy} className="w-full">
-            저장
-          </Button>
-        </div>
-      )}
+      {/* 수정 모달 */}
+      <Dialog
+        open={editOpen}
+        onOpenChange={(o) => {
+          if (!busy && !confirmOpen) setEditOpen(o);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>기준 근무 수정</DialogTitle>
+            <DialogDescription>
+              <span className="font-semibold text-foreground">
+                {list.find((e) => e.staff_id === selectedId)?.staff_name}
+              </span>
+              {(() => {
+                const pos = list.find((e) => e.staff_id === selectedId)?.staff_position;
+                return pos ? ` (${pos})` : "";
+              })()}
+              님의 기준일 · 기준 근무번호를 수정합니다.
+            </DialogDescription>
+          </DialogHeader>
 
+          <div className="flex flex-col gap-3">
+            {error && (
+              <p className="text-destructive text-sm font-medium">{error}</p>
+            )}
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">기준일</span>
+              <Input
+                type="date"
+                value={refDate}
+                disabled={busy}
+                onChange={(e) => setRefDate(e.target.value)}
+                className="h-9"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">기준 근무번호</span>
+              <Input
+                type="text"
+                value={refShift}
+                disabled={busy}
+                placeholder="예) 56, 52~, 휴22, 대11~"
+                onChange={(e) => setRefShift(e.target.value)}
+                className="h-9"
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => setEditOpen(false)}
+              >
+                취소
+              </Button>
+              <Button onClick={requestSave} disabled={busy}>
+                저장
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 저장 확인 모달 */}
       <Dialog
         open={confirmOpen}
         onOpenChange={(o) => !busy && setConfirmOpen(o)}
