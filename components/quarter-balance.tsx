@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
@@ -83,12 +83,14 @@ export function QuarterBalance() {
   );
   const [position, setPosition] = useState<Position>("기관사");
   const [rows, setRows] = useState<StaffRow[]>([]);
+  const [hasFetched, setHasFetched] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    setHasFetched(true);
     const { start, end } = quarterRange(year, quarter);
     const months = quarterMonths(year, quarter);
 
@@ -223,10 +225,6 @@ export function QuarterBalance() {
       setIsLoading(false);
     }
   }, [year, quarter]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   // 합계 = 휴무 + 운휴 + 지휴 − 지근. 24 가 아닌 직원만 표시.
   const total = (r: StaffRow) =>
@@ -371,7 +369,12 @@ export function QuarterBalance() {
       )}
 
       <div className="flex-1 overflow-auto px-2 pb-20">
-        {!isLoading && mismatched.length === 0 && !error && (
+        {!hasFetched && !isLoading && (
+          <div className="text-center text-muted-foreground py-12">
+            분기를 선택하고 <span className="font-semibold text-foreground">조회</span> 버튼을 누르면 검증 결과가 표시됩니다.
+          </div>
+        )}
+        {hasFetched && !isLoading && mismatched.length === 0 && !error && (
           <div className="text-center text-muted-foreground py-12">
             {position} 전원이 분기 휴무 {QUARTER_TARGET}개를 정확히 충족했습니다. ✅
           </div>
