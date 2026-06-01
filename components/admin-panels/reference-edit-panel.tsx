@@ -27,6 +27,8 @@ export function ReferenceEditPanel() {
   const [list, setList] = useState<RefEmployee[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [sortAsc, setSortAsc] = useState(true);
+  const [positionFilter, setPositionFilter] = useState<"전체" | "기관사" | "차장">("전체");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [refDate, setRefDate] = useState("");
@@ -123,9 +125,23 @@ export function ReferenceEditPanel() {
   };
 
   const q = search.trim().toLowerCase();
-  const filtered = q
-    ? list.filter((e) => e.staff_name.toLowerCase().includes(q))
-    : list;
+  const filtered = list
+    .filter((e) => {
+      const name = (e.staff_name ?? "").trim();
+      const lower = name.toLowerCase();
+      // 관리자/vip로 시작하는 이름 제외
+      if (name.startsWith("관리자") || lower.startsWith("vip")) return false;
+      // 직책 분류
+      if (positionFilter !== "전체" && e.staff_position !== positionFilter)
+        return false;
+      // 이름 검색
+      if (q && !lower.includes(q)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const cmp = (a.staff_name ?? "").localeCompare(b.staff_name ?? "", "ko");
+      return sortAsc ? cmp : -cmp;
+    });
 
   return (
     <div className="flex flex-1 flex-col min-w-0 gap-3 p-4 overflow-auto">
@@ -143,13 +159,41 @@ export function ReferenceEditPanel() {
         </p>
       )}
 
-      <Input
-        type="text"
-        placeholder="이름 검색"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="h-9 max-w-sm"
-      />
+      <div className="flex flex-wrap items-center gap-2 max-w-2xl">
+        <Input
+          type="text"
+          placeholder="이름 검색"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-9 max-w-xs flex-1 min-w-[140px]"
+        />
+        <div className="flex items-center rounded-md border p-0.5">
+          {(["전체", "기관사", "차장"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPositionFilter(p)}
+              className={cn(
+                "rounded px-3 py-1 text-sm font-medium transition-colors",
+                positionFilter === p
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent"
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9 gap-1"
+          onClick={() => setSortAsc((v) => !v)}
+        >
+          이름 {sortAsc ? "↑ 오름차순" : "↓ 내림차순"}
+        </Button>
+      </div>
 
       <div className="border rounded-md divide-y max-w-2xl">
         {listLoading && (
