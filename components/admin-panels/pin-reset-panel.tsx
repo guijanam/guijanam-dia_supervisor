@@ -71,9 +71,13 @@ export function PinResetPanel() {
   };
 
   const q = search.trim().toLowerCase();
-  const list = q
-    ? empList.filter((e) => e.staff_name.toLowerCase().includes(q))
-    : empList;
+  const list = empList.filter((e) => {
+    // 기관사/차장 직책만 표시
+    if (e.staff_position !== "기관사" && e.staff_position !== "차장")
+      return false;
+    if (q && !e.staff_name.toLowerCase().includes(q)) return false;
+    return true;
+  });
 
   return (
     <div className="flex flex-1 flex-col min-w-0 gap-3 p-4 overflow-auto">

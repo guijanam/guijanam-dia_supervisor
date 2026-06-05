@@ -129,8 +129,9 @@ export function ReferenceEditPanel() {
     .filter((e) => {
       const name = (e.staff_name ?? "").trim();
       const lower = name.toLowerCase();
-      // 관리자/vip로 시작하는 이름 제외
-      if (name.startsWith("관리자") || lower.startsWith("vip")) return false;
+      // 기관사/차장 직책만 표시
+      if (e.staff_position !== "기관사" && e.staff_position !== "차장")
+        return false;
       // 직책 분류
       if (positionFilter !== "전체" && e.staff_position !== positionFilter)
         return false;
