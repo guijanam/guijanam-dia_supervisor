@@ -4,7 +4,11 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type { RecordType, ScheduleRecord, SpecialSchedule } from "@/lib/types";
-import { DEFAULT_WEEKEND_HOLIDAY_TURNS, parseTurnsText } from "@/lib/types";
+import {
+  DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  DEFAULT_JIGEUN_NUMBER_TURNS,
+  parseTurnsText,
+} from "@/lib/types";
 import {
   getTodayMonthStr,
   getCalendarGrid,
@@ -54,6 +58,9 @@ export function UserCalendar() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
+  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
+    DEFAULT_JIGEUN_NUMBER_TURNS
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -71,7 +78,7 @@ export function UserCalendar() {
     let weekendTurnCount = 0;
     for (const [date, turn] of regularMap) {
       if (!isSameMonth(date, monthValue)) continue;
-      if (turn.includes("휴")) hueCount++;
+      if (turn.includes("휴") && !jigeunNumberTurns.includes(turn)) hueCount++;
       const dayName = getDayName(date);
       const isHoliday =
         dayName === "토" || dayName === "일" || holidays.has(date);
@@ -88,7 +95,7 @@ export function UserCalendar() {
 
     const totalRest = hueCount + weekendTurnCount + jihyuCount - jigeunCount;
     return { hueCount, weekendTurnCount, jigeunCount, jihyuCount, totalRest };
-  }, [regularMap, specialMap, holidays, monthValue, weekendHolidayTurns]);
+  }, [regularMap, specialMap, holidays, monthValue, weekendHolidayTurns, jigeunNumberTurns]);
 
   const fetchData = useCallback(async () => {
     if (!employee) return;
@@ -122,7 +129,7 @@ export function UserCalendar() {
             .lte("locdate", end),
           supabase
             .from("app_settings")
-            .select("request_freeze_date, weekend_holiday_turns")
+            .select("request_freeze_date, weekend_holiday_turns, jigeun_number_turns")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -133,10 +140,14 @@ export function UserCalendar() {
       const settings = settingsResult.data as {
         request_freeze_date: string | null;
         weekend_holiday_turns: string | null;
+        jigeun_number_turns: string | null;
       } | null;
       setRequestFreezeDate(settings?.request_freeze_date ?? null);
       setWeekendHolidayTurns(
         settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
+      );
+      setJigeunNumberTurns(
+        settings ? parseTurnsText(settings.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
       );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑 (전 직원)
@@ -287,7 +298,7 @@ export function UserCalendar() {
         <span className="rounded px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
           운휴 {monthStats.weekendTurnCount}
         </span>
-        <span className="rounded px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300">
+        <span className="rounded px-2 py-0.5 bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
           지근 {monthStats.jigeunCount}
         </span>
         <span className="rounded px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
@@ -335,6 +346,15 @@ export function UserCalendar() {
             const inMonth = isSameMonth(date, monthValue);
             const turn = regularMap.get(date);
             const entries = allEntriesMap.get(date) ?? [];
+            const turnBgClass = turn
+              ? getTurnColorClass(
+                  turn,
+                  date,
+                  holidays,
+                  weekendHolidayTurns,
+                  jigeunNumberTurns
+                )
+              : "";
             return (
               <button
                 key={date}
@@ -342,9 +362,10 @@ export function UserCalendar() {
                 className={cn(
                   "min-h-[64px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col",
                   !inMonth && "opacity-35",
-                  turn &&
-                    getTurnColorClass(turn, date, holidays, weekendHolidayTurns).includes("bg-red") &&
-                    "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800"
+                  turnBgClass.includes("bg-red") &&
+                    "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800",
+                  turnBgClass.includes("bg-sky") &&
+                    "bg-sky-100 dark:bg-sky-900/40 border-sky-300 dark:border-sky-800"
                 )}
               >
                 <span

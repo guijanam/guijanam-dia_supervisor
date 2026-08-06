@@ -12,6 +12,7 @@ import type {
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  DEFAULT_JIGEUN_NUMBER_TURNS,
   parseTurnsText,
 } from "@/lib/types";
 import {
@@ -83,6 +84,9 @@ export function AdminCalendar() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
+  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
+    DEFAULT_JIGEUN_NUMBER_TURNS
+  );
   const [reschedTarget, setReschedTarget] = useState<SpecialEntry | null>(null);
 
   // 선택한 날짜에 즉시 지근/지휴를 신규 등록하기 위한 인라인 폼 상태
@@ -153,7 +157,7 @@ export function AdminCalendar() {
           supabase
             .from("app_settings")
             .select(
-              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns"
+              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns, jigeun_number_turns"
             )
             .eq("id", 1)
             .maybeSingle(),
@@ -168,6 +172,7 @@ export function AdminCalendar() {
         jigeun_cap_sunday: number;
         jigeun_cap_holiday: number;
         weekend_holiday_turns: string | null;
+        jigeun_number_turns: string | null;
       } | null;
       setCaps(
         s
@@ -181,6 +186,9 @@ export function AdminCalendar() {
       );
       setWeekendHolidayTurns(
         s ? parseTurnsText(s.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
+      );
+      setJigeunNumberTurns(
+        s ? parseTurnsText(s.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
       );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑 — entry.regularTurn 채우기에만 사용.
@@ -518,7 +526,12 @@ export function AdminCalendar() {
               (() => {
                 const q = staffSearch.trim().toLowerCase();
                 const matches = empList
-                  .filter((e) => e.staff_name.toLowerCase().includes(q))
+                  .filter(
+                    (e) =>
+                      (e.staff_position === "기관사" ||
+                        e.staff_position === "차장") &&
+                      e.staff_name.toLowerCase().includes(q)
+                  )
                   .slice(0, 12);
                 if (matches.length === 0) {
                   return (
@@ -847,6 +860,7 @@ export function AdminCalendar() {
         originDate={selectedDate}
         initialMonth={monthValue}
         weekendHolidayTurns={weekendHolidayTurns}
+        jigeunNumberTurns={jigeunNumberTurns}
         onClose={() => setReschedTarget(null)}
         onMoved={() => {
           void fetchData();

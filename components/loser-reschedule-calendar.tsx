@@ -50,6 +50,7 @@ interface Props {
   originDate: string | null;
   initialMonth: string;
   weekendHolidayTurns: string[];
+  jigeunNumberTurns: string[];
   onClose: () => void;
   onMoved: () => void;
 }
@@ -60,6 +61,7 @@ export function LoserRescheduleCalendar({
   originDate,
   initialMonth,
   weekendHolidayTurns,
+  jigeunNumberTurns,
   onClose,
   onMoved,
 }: Props) {
@@ -333,7 +335,13 @@ export function LoserRescheduleCalendar({
               const mine = mineMap.get(date);
               const isOrigin = date === originDate;
               const turnBgClass = turn
-                ? getTurnColorClass(turn, date, holidays, weekendHolidayTurns)
+                ? getTurnColorClass(
+                    turn,
+                    date,
+                    holidays,
+                    weekendHolidayTurns,
+                    jigeunNumberTurns
+                  )
                 : "";
               const isRest = turnBgClass.includes("bg-red");
               const disabled =

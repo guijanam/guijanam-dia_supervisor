@@ -3,7 +3,11 @@
 import { useState, useRef, type ComponentType } from "react";
 import { useAuth } from "@/lib/auth-context";
 import type { JigeunCaps } from "@/lib/types";
-import { DEFAULT_JIGEUN_CAPS, DEFAULT_WEEKEND_HOLIDAY_TURNS } from "@/lib/types";
+import {
+  DEFAULT_JIGEUN_CAPS,
+  DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  DEFAULT_JIGEUN_NUMBER_TURNS,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -72,6 +76,9 @@ export function AdminDashboard() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
+  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
+    DEFAULT_JIGEUN_NUMBER_TURNS
+  );
   // RequestsPanel 의 재조회 함수 — JigeunCapSettings 저장 후 호출
   const requestsRefreshRef = useRef<() => void>(() => {});
 
@@ -107,6 +114,7 @@ export function AdminDashboard() {
             caps={caps}
             freezeDate={freezeDate}
             weekendHolidayTurns={weekendHolidayTurns}
+            jigeunNumberTurns={jigeunNumberTurns}
             onSaved={() => requestsRefreshRef.current()}
           />
           <ThemeToggle />
@@ -170,6 +178,7 @@ export function AdminDashboard() {
                 setCaps(s.caps);
                 setFreezeDate(s.freezeDate);
                 setWeekendHolidayTurns(s.weekendHolidayTurns);
+                setJigeunNumberTurns(s.jigeunNumberTurns);
               }}
               registerRefresh={(fn) => {
                 requestsRefreshRef.current = fn;

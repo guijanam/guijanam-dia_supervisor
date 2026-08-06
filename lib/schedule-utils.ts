@@ -1,6 +1,10 @@
 import { eachDayOfInterval, format, getDay, parse, startOfMonth, endOfMonth, addDays, startOfWeek, endOfWeek } from "date-fns";
 import type { ScheduleRecord, JigeunCaps } from "./types";
-import { DEFAULT_JIGEUN_CAPS, DEFAULT_WEEKEND_HOLIDAY_TURNS } from "./types";
+import {
+  DEFAULT_JIGEUN_CAPS,
+  DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  DEFAULT_JIGEUN_NUMBER_TURNS,
+} from "./types";
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -55,13 +59,17 @@ export function getTurnColorClass(
   turnText: string,
   dateString: string,
   holidays?: Set<string>,
-  weekendHolidayTurns: string[] = DEFAULT_WEEKEND_HOLIDAY_TURNS
+  weekendHolidayTurns: string[] = DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  jigeunNumberTurns: string[] = DEFAULT_JIGEUN_NUMBER_TURNS
 ): string {
   const dayName = getDayName(dateString);
   const isHoliday = dayName === "토" || dayName === "일" || !!holidays?.has(dateString);
 
   if (isHoliday && weekendHolidayTurns.includes(turnText)) {
     return "bg-red-100 dark:bg-red-900/40";
+  }
+  if (jigeunNumberTurns.includes(turnText)) {
+    return "bg-sky-100 dark:bg-sky-900/40";
   }
   if (turnText.includes("휴")) return "bg-red-100 dark:bg-red-900/40";
   if (turnText.includes("대")) return "bg-green-100 dark:bg-green-900/40";

@@ -3,7 +3,11 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { ScheduleRecord, PositionTab } from "@/lib/types";
-import { DEFAULT_WEEKEND_HOLIDAY_TURNS, parseTurnsText } from "@/lib/types";
+import {
+  DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  DEFAULT_JIGEUN_NUMBER_TURNS,
+  parseTurnsText,
+} from "@/lib/types";
 import {
   getTodayMonthStr,
   generateDateRange,
@@ -26,6 +30,9 @@ export function ScheduleViewer() {
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
+  );
+  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
+    DEFAULT_JIGEUN_NUMBER_TURNS
   );
   const [maintenance, setMaintenance] = useState<{
     is_active: boolean;
@@ -52,7 +59,7 @@ export function ScheduleViewer() {
           .lte("locdate", end),
         supabase
           .from("app_settings")
-          .select("weekend_holiday_turns")
+          .select("weekend_holiday_turns, jigeun_number_turns")
           .eq("id", 1)
           .maybeSingle(),
       ]);
@@ -66,9 +73,13 @@ export function ScheduleViewer() {
 
       const settings = settingsResult.data as {
         weekend_holiday_turns: string | null;
+        jigeun_number_turns: string | null;
       } | null;
       setWeekendHolidayTurns(
         settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
+      );
+      setJigeunNumberTurns(
+        settings ? parseTurnsText(settings.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
       );
 
       if (!scheduleResult.data || scheduleResult.data.length === 0) {
@@ -169,6 +180,7 @@ export function ScheduleViewer() {
           emptyMessage={emptyMessage}
           holidays={holidays}
           weekendHolidayTurns={weekendHolidayTurns}
+          jigeunNumberTurns={jigeunNumberTurns}
         />
       </div>
       <BottomTabs selectedTab={selectedTab} onTabChange={setSelectedTab} />

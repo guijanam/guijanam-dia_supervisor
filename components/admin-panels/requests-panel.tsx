@@ -12,6 +12,7 @@ import type {
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  DEFAULT_JIGEUN_NUMBER_TURNS,
   parseTurnsText,
 } from "@/lib/types";
 import { getTodayMonthStr, getDayName, getTurnColorClass } from "@/lib/schedule-utils";
@@ -50,11 +51,23 @@ interface Row extends SpecialScheduleWithEmployee {
   regularTurn: string | null;
 }
 
+// 지근 번호(turn)로 지정되어 special_schedules 신청 없이 자동으로 지근 처리되는 근무.
+// exportExcel 에서 기존 신청 건과 같은 행 포맷으로 합쳐 내보내기 위한 용도.
+interface JigeunNumberRow {
+  staff_id: number;
+  staff_name: string;
+  staff_position: string;
+  employee_number: string | null;
+  target_date: string;
+  regularTurn: string;
+}
+
 // 헤더(freezeDate 배지)·JigeunCapSettings 가 쓰는 설정 묶음
 export interface SettingsSnapshot {
   caps: JigeunCaps;
   freezeDate: string | null;
   weekendHolidayTurns: string[];
+  jigeunNumberTurns: string[];
 }
 
 interface RequestsPanelProps {
@@ -71,11 +84,15 @@ export function RequestsPanel({
   const [monthValue, setMonthValue] = useState(getTodayMonthStr());
   const [nameFilter, setNameFilter] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
+  const [jigeunNumberRows, setJigeunNumberRows] = useState<JigeunNumberRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
+  );
+  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
+    DEFAULT_JIGEUN_NUMBER_TURNS
   );
 
   // 전체 삭제 확인 모달 상태
@@ -122,7 +139,7 @@ export function RequestsPanel({
             .range(0, 10000),
           supabase
             .from("app_settings")
-            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns")
+            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_number_turns")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -137,6 +154,7 @@ export function RequestsPanel({
         jigeun_cap_holiday: number;
         request_freeze_date: string | null;
         weekend_holiday_turns: string | null;
+        jigeun_number_turns: string | null;
       } | null;
       const caps = s
         ? {
@@ -150,12 +168,22 @@ export function RequestsPanel({
       const turns = s
         ? parseTurnsText(s.weekend_holiday_turns)
         : DEFAULT_WEEKEND_HOLIDAY_TURNS;
+      const jigeunTurns = s
+        ? parseTurnsText(s.jigeun_number_turns)
+        : DEFAULT_JIGEUN_NUMBER_TURNS;
       setWeekendHolidayTurns(turns);
-      onSettingsLoadedRef.current?.({ caps, freezeDate, weekendHolidayTurns: turns });
+      setJigeunNumberTurns(jigeunTurns);
+      onSettingsLoadedRef.current?.({
+        caps,
+        freezeDate,
+        weekendHolidayTurns: turns,
+        jigeunNumberTurns: jigeunTurns,
+      });
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑
+      const scheduleRows = (scheduleResult.data ?? []) as ScheduleRecord[];
       const regularMap = new Map<string, string>();
-      for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+      for (const row of scheduleRows) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
@@ -170,12 +198,39 @@ export function RequestsPanel({
         created_at?: string;
       }>;
 
+      // 지근 번호(turn)로 자동 지정된 (staff_id, 날짜) — special_schedules 신청과 중복 제외용
+      const jigeunNumberEntries: Array<{
+        staff_id: number;
+        target_date: string;
+        turn: string;
+      }> = [];
+      const requestedKeys = new Set(
+        list.map((s) => `${s.staff_id}|${s.target_date}`)
+      );
+      for (const row of scheduleRows) {
+        const dateStr = row.date
+          ? format(new Date(row.date), "yyyy-MM-dd")
+          : "";
+        if (!dateStr || !jigeunTurns.includes(row.turn)) continue;
+        if (requestedKeys.has(`${row.staff_id}|${dateStr}`)) continue;
+        jigeunNumberEntries.push({
+          staff_id: row.staff_id,
+          target_date: dateStr,
+          turn: row.turn,
+        });
+      }
+
       // staff_id → coworker_list 정보 매핑 (FK 임베딩 대신 별도 조회)
       const empMap = new Map<
         number,
         { staff_name: string; employee_number: string | null; staff_position: string }
       >();
-      const ids = [...new Set(list.map((s) => s.staff_id))];
+      const ids = [
+        ...new Set([
+          ...list.map((s) => s.staff_id),
+          ...jigeunNumberEntries.map((e) => e.staff_id),
+        ]),
+      ];
       if (ids.length > 0) {
         const { data: emps, error: eErr } = await supabase
           .from("coworker_list")
@@ -190,6 +245,20 @@ export function RequestsPanel({
           });
         }
       }
+
+      setJigeunNumberRows(
+        jigeunNumberEntries.map((e) => {
+          const emp = empMap.get(e.staff_id);
+          return {
+            staff_id: e.staff_id,
+            staff_name: emp?.staff_name ?? `(미상 ${e.staff_id})`,
+            staff_position: emp?.staff_position ?? "",
+            employee_number: emp?.employee_number ?? null,
+            target_date: e.target_date,
+            regularTurn: e.turn,
+          };
+        })
+      );
 
       const mapped: Row[] = list.map((s) => ({
         ...s,
@@ -339,30 +408,75 @@ export function RequestsPanel({
   };
 
   const exportExcel = () => {
-    const sheetData = filtered.map((r) => ({
-      사번: r.employee?.employee_number ?? "",
-      직책: r.employee?.staff_position ?? "",
-      이름: r.employee?.staff_name ?? "",
-      날짜: r.target_date,
-      요일: getDayName(r.target_date),
-      "원래 근무": r.regularTurn ?? "",
-      구분: r.record_type,
-      신청일시: r.created_at
-        ? new Date(r.created_at).toLocaleString("ko-KR")
-        : "",
-    }));
-    const ws = XLSX.utils.json_to_sheet(sheetData);
-    ws["!cols"] = [
-      { wch: 10 },
-      { wch: 12 },
-      { wch: 8 },
-      { wch: 12 },
-      { wch: 6 },
-      { wch: 8 },
-      { wch: 22 },
-    ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, `지근지휴_${monthValue}`);
+
+    const f = nameFilter.trim().toLowerCase();
+    const filteredJigeunNumberRows = jigeunNumberRows.filter(
+      (r) =>
+        !f ||
+        r.staff_name.toLowerCase().includes(f) ||
+        String(r.employee_number ?? "").toLowerCase().includes(f)
+    );
+
+    type ExportEntry = {
+      employee_number: string | null;
+      staff_position: string;
+      staff_name: string;
+      target_date: string;
+      regularTurn: string | null;
+      record_type: string;
+      created_at?: string;
+    };
+
+    const combined: ExportEntry[] = [
+      ...filtered.map((r) => ({
+        employee_number: r.employee?.employee_number ?? null,
+        staff_position: r.employee?.staff_position ?? "",
+        staff_name: r.employee?.staff_name ?? "",
+        target_date: r.target_date,
+        regularTurn: r.regularTurn,
+        record_type: r.record_type,
+        created_at: r.created_at,
+      })),
+      ...filteredJigeunNumberRows.map((r) => ({
+        employee_number: r.employee_number,
+        staff_position: r.staff_position,
+        staff_name: r.staff_name,
+        target_date: r.target_date,
+        regularTurn: r.regularTurn,
+        record_type: "지근(번호)",
+      })),
+    ];
+
+    for (const pos of ["기관사", "차장"] as const) {
+      const sheetData = combined
+        .filter((r) => r.staff_position === pos)
+        .sort((a, b) => a.target_date.localeCompare(b.target_date))
+        .map((r) => ({
+          사번: r.employee_number ?? "",
+          직책: r.staff_position ?? "",
+          이름: r.staff_name ?? "",
+          날짜: r.target_date,
+          요일: getDayName(r.target_date),
+          "원래 근무": r.regularTurn ?? "",
+          구분: r.record_type,
+          신청일시: r.created_at
+            ? new Date(r.created_at).toLocaleString("ko-KR")
+            : "",
+        }));
+      const ws = XLSX.utils.json_to_sheet(sheetData);
+      ws["!cols"] = [
+        { wch: 10 },
+        { wch: 12 },
+        { wch: 8 },
+        { wch: 12 },
+        { wch: 6 },
+        { wch: 8 },
+        { wch: 22 },
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, pos);
+    }
+
     XLSX.writeFile(wb, `지근지휴_${monthValue}.xlsx`);
   };
 
@@ -522,7 +636,8 @@ export function RequestsPanel({
                             row.regularTurn,
                             row.target_date,
                             undefined,
-                            weekendHolidayTurns
+                            weekendHolidayTurns,
+                            jigeunNumberTurns
                           )
                         : ""
                     )}

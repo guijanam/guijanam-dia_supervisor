@@ -7,6 +7,7 @@ import type { JigeunCaps } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
+  DEFAULT_JIGEUN_NUMBER_TURNS,
   parseTurnsText,
   formatTurnsText,
 } from "@/lib/types";
@@ -32,6 +33,7 @@ interface Props {
   caps: JigeunCaps;
   freezeDate: string | null;
   weekendHolidayTurns: string[];
+  jigeunNumberTurns: string[];
   onSaved: () => void;
 }
 
@@ -39,6 +41,7 @@ export function JigeunCapSettings({
   caps,
   freezeDate,
   weekendHolidayTurns,
+  jigeunNumberTurns,
   onSaved,
 }: Props) {
   const { isAdmin, employee } = useAuth();
@@ -51,6 +54,9 @@ export function JigeunCapSettings({
   const [draftTurnsText, setDraftTurnsText] = useState<string>(
     formatTurnsText(weekendHolidayTurns)
   );
+  const [draftJigeunTurnsText, setDraftJigeunTurnsText] = useState<string>(
+    formatTurnsText(jigeunNumberTurns)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,9 +66,10 @@ export function JigeunCapSettings({
       setDraft(caps);
       setDraftFreezeDate(freezeDate ?? "");
       setDraftTurnsText(formatTurnsText(weekendHolidayTurns));
+      setDraftJigeunTurnsText(formatTurnsText(jigeunNumberTurns));
       setError(null);
     }
-  }, [open, caps, freezeDate, weekendHolidayTurns]);
+  }, [open, caps, freezeDate, weekendHolidayTurns, jigeunNumberTurns]);
 
   if (!isAdmin || !employee) return null;
 
@@ -79,6 +86,7 @@ export function JigeunCapSettings({
     setError(null);
     try {
       const normalizedTurns = parseTurnsText(draftTurnsText);
+      const normalizedJigeunTurns = parseTurnsText(draftJigeunTurnsText);
       const { error: upErr } = await supabase
         .from("app_settings")
         .update({
@@ -88,6 +96,7 @@ export function JigeunCapSettings({
           jigeun_cap_holiday: draft.holiday,
           request_freeze_date: draftFreezeDate ? draftFreezeDate : null,
           weekend_holiday_turns: formatTurnsText(normalizedTurns),
+          jigeun_number_turns: formatTurnsText(normalizedJigeunTurns),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -191,12 +200,31 @@ export function JigeunCapSettings({
             </p>
           </div>
 
+          <div className="flex flex-col gap-1 pt-2 border-t">
+            <div className="flex items-start gap-3">
+              <label className="w-16 text-sm font-medium pt-2">지근 번호</label>
+              <Input
+                type="text"
+                className="h-9"
+                placeholder="예: 41,42,43"
+                value={draftJigeunTurnsText}
+                disabled={isSaving}
+                onChange={(e) => setDraftJigeunTurnsText(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground pl-[4.75rem]">
+              요일/공휴일과 무관하게 지근으로 표시할 근무번호를 쉼표로
+              구분해 입력하세요. 비우면 지근 표시가 되지 않습니다.
+            </p>
+          </div>
+
           <div className="grid grid-cols-3 gap-2">
             <Button
               variant="ghost"
               onClick={() => {
                 setDraft(DEFAULT_JIGEUN_CAPS);
                 setDraftTurnsText(formatTurnsText(DEFAULT_WEEKEND_HOLIDAY_TURNS));
+                setDraftJigeunTurnsText(formatTurnsText(DEFAULT_JIGEUN_NUMBER_TURNS));
               }}
               disabled={isSaving}
               title="기본값(정원 4/2/4/4, 운휴 31~37)으로 되돌리기"

@@ -360,4 +360,13 @@ CREATE OR REPLACE FUNCTION check_device_vip(p_device_id TEXT)
 RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER STABLE AS $$
   SELECT EXISTS (SELECT 1 FROM coworker_list WHERE device_id = p_device_id);
 $$;
+
+-- ============================================================
+-- 15) 지근 번호(요일과 무관하게 지근으로 표시할 turn) -----------
+--  - 정규 근무표의 근무번호(turn) 중 지근으로 지정된 번호는
+--    요일/공휴일과 무관하게 달력에서 지근 색상으로 표시.
+--  - 쉼표로 구분된 텍스트(예: '41,42,43'). 빈 문자열/NULL 이면 표시 없음.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists jigeun_number_turns text not null default '';
 GRANT EXECUTE ON FUNCTION check_device_vip(TEXT) TO anon, authenticated;
