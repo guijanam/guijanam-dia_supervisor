@@ -7,7 +7,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter), "Apple SD Gothic Neo", "Pretendard",
+    system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -48,72 +49,74 @@
 }
 
 :root {
+  /* Stripe(Stripi) light theme: white canvas / indigo CTA / deep-navy ink */
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(1 0 0); /* canvas #ffffff */
+  --foreground: oklch(0.2591 0.0544 250.72); /* ink #0d253d */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.2591 0.0544 250.72);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.2591 0.0544 250.72);
+  --primary: oklch(0.5211 0.2679 277.43); /* indigo #533afd */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.9807 0.0051 247.88); /* canvas-soft #f6f9fc */
+  --secondary-foreground: oklch(0.2591 0.0544 250.72);
+  --muted: oklch(0.9807 0.0051 247.88);
+  --muted-foreground: oklch(0.5552 0.0435 259.24); /* ink-mute #64748d */
+  --accent: oklch(0.9807 0.0051 247.88); /* soft hover surface */
+  --accent-foreground: oklch(0.4621 0.23 276.92); /* primary-deep #4434d4 */
+  --destructive: oklch(0.6093 0.2282 10.76); /* ruby #ea2261 */
+  --border: oklch(0.9289 0.0097 252.81); /* hairline #e3e8ee */
+  --input: oklch(0.806 0.0483 248.43); /* hairline-input #a8c3de */
+  --ring: oklch(0.5211 0.2679 277.43); /* indigo focus ring */
+  --chart-1: oklch(0.5211 0.2679 277.43); /* indigo */
+  --chart-2: oklch(0.5836 0.2282 278.87); /* indigo-soft */
+  --chart-3: oklch(0.6093 0.2282 10.76); /* ruby */
+  --chart-4: oklch(0.7461 0.2276 330.68); /* magenta */
+  --chart-5: oklch(0.2701 0.0962 276.24); /* brand-dark-900 */
+  --sidebar: oklch(0.9807 0.0051 247.88);
+  --sidebar-foreground: oklch(0.2591 0.0544 250.72);
+  --sidebar-primary: oklch(0.5211 0.2679 277.43);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.9807 0.0051 247.88);
+  --sidebar-accent-foreground: oklch(0.4621 0.23 276.92);
+  --sidebar-border: oklch(0.9289 0.0097 252.81);
+  --sidebar-ring: oklch(0.5211 0.2679 277.43);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  /* Stripe dark dashboard shell: deep-navy surfaces / indigo-soft accents */
+  --background: oklch(0.22 0.045 270); /* desaturated deep navy, easy on eyes */
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.2701 0.0962 276.24); /* brand-dark-900 #1c1e54 */
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.2701 0.0962 276.24);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --primary: oklch(0.5836 0.2282 278.87); /* indigo-soft #665efd */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.3 0.06 272);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --muted: oklch(0.3 0.06 272);
+  --muted-foreground: oklch(0.78 0.03 260); /* light ink-mute */
+  --accent: oklch(0.3 0.06 272);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+  --destructive: oklch(0.6093 0.2282 10.76); /* ruby */
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
+  --ring: oklch(0.5836 0.2282 278.87); /* indigo-soft */
+  --chart-1: oklch(0.5836 0.2282 278.87); /* indigo-soft */
+  --chart-2: oklch(0.8085 0.0899 284.21); /* indigo subdued */
+  --chart-3: oklch(0.6093 0.2282 10.76); /* ruby */
+  --chart-4: oklch(0.7461 0.2276 330.68); /* magenta */
+  --chart-5: oklch(0.985 0 0);
+  --sidebar: oklch(0.2701 0.0962 276.24);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-primary: oklch(0.5836 0.2282 278.87);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.3 0.06 272);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.5836 0.2282 278.87);
 }
 
 @layer base {
@@ -122,5 +125,20 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Stripe signature: ss01 stylistic set globally */
+    font-feature-settings: "ss01";
+  }
+  /* Editorial-density display: thin weight + slight negative tracking.
+     Kept light so Korean glyphs (rendered via fallback) don't crowd. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.015em;
+  }
+  /* Tabular figures for money / numeric cells — quiet financial-data signal. */
+  .tabular-nums,
+  [data-tnum] {
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
   }
 }
