@@ -83,6 +83,9 @@ export function RequestsPanel({
 }: RequestsPanelProps) {
   const [monthValue, setMonthValue] = useState(getTodayMonthStr());
   const [nameFilter, setNameFilter] = useState("");
+  const [positionFilter, setPositionFilter] = useState<
+    "전체" | "기관사" | "차장"
+  >("전체");
   const [rows, setRows] = useState<Row[]>([]);
   const [jigeunNumberRows, setJigeunNumberRows] = useState<JigeunNumberRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -294,13 +297,19 @@ export function RequestsPanel({
 
   const filtered = useMemo(() => {
     const f = nameFilter.trim().toLowerCase();
-    if (!f) return rows;
-    return rows.filter(
-      (r) =>
+    return rows.filter((r) => {
+      if (
+        positionFilter !== "전체" &&
+        r.employee?.staff_position !== positionFilter
+      )
+        return false;
+      if (!f) return true;
+      return (
         r.employee?.staff_name?.toLowerCase().includes(f) ||
         String(r.employee?.employee_number ?? "").toLowerCase().includes(f)
-    );
-  }, [rows, nameFilter]);
+      );
+    });
+  }, [rows, nameFilter, positionFilter]);
 
   const saveRow = async (row: Row) => {
     setBusyId(row.id);
@@ -354,9 +363,11 @@ export function RequestsPanel({
     if (empList.length === 0) {
       setEmpLoading(true);
       try {
+        // 기관사/차장 직책만 등록 대상 (관리자·vip 등 제외)
         const { data, error: eErr } = await supabase
           .from("coworker_list")
           .select("staff_id, staff_name, staff_position")
+          .in("staff_position", ["기관사", "차장"])
           .order("staff_name", { ascending: true });
         if (eErr) throw eErr;
         setEmpList(
@@ -411,12 +422,15 @@ export function RequestsPanel({
     const wb = XLSX.utils.book_new();
 
     const f = nameFilter.trim().toLowerCase();
-    const filteredJigeunNumberRows = jigeunNumberRows.filter(
-      (r) =>
+    const filteredJigeunNumberRows = jigeunNumberRows.filter((r) => {
+      if (positionFilter !== "전체" && r.staff_position !== positionFilter)
+        return false;
+      return (
         !f ||
         r.staff_name.toLowerCase().includes(f) ||
         String(r.employee_number ?? "").toLowerCase().includes(f)
-    );
+      );
+    });
 
     type ExportEntry = {
       employee_number: string | null;
@@ -546,6 +560,23 @@ export function RequestsPanel({
           onChange={(e) => setNameFilter(e.target.value)}
           className="w-40"
         />
+        <div className="flex items-center rounded-md border p-0.5">
+          {(["전체", "기관사", "차장"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPositionFilter(p)}
+              className={cn(
+                "rounded px-3 py-1 text-sm font-medium transition-colors",
+                positionFilter === p
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent"
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
         <Button size="sm" onClick={fetchData} disabled={isLoading}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "조회"}
         </Button>
