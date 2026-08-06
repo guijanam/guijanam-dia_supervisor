@@ -370,3 +370,18 @@ $$;
 alter table public.app_settings
   add column if not exists jigeun_number_turns text not null default '';
 GRANT EXECUTE ON FUNCTION check_device_vip(TEXT) TO anon, authenticated;
+
+-- ============================================================
+-- 16) 연휴 근무번호 짝 치환 (표시 전용) ------------------------
+--  - 근무순서상 연속된 이틀(N일, N+1일)이 모두 토/일/공휴일일 때에만
+--    그 이틀의 근무번호를 다른 코드로 '표시'만 바꾼다.
+--    예) 58,58~ → 휴73,휴74
+--  - 둘 중 하루만 휴일이면 치환하지 않는다(짝 규칙).
+--  - 표시 전용: 휴무/운휴/총휴/분기밸런스 집계는 항상 원래 turn 을 사용.
+--  - 형식: '원래A,원래B:표시A,표시B' 를 ';' 로 구분해 나열.
+--    예) '58,58~:휴73,휴74;62,62~:휴75,휴76'
+--  - 빈 문자열이면 치환 없음(기본값) — 설정 전에는 기존 동작과 동일.
+--  - 형식이 깨진 항목은 클라이언트에서 조용히 무시된다.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists holiday_turn_rules text not null default '';

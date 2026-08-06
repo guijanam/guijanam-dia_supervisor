@@ -8,14 +8,22 @@ import type {
   ScheduleRecord,
   SpecialScheduleWithEmployee,
   JigeunCaps,
+  HolidayTurnRule,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
+  parseHolidayTurnRulesText,
 } from "@/lib/types";
-import { getTodayMonthStr, getDayName, getTurnColorClass } from "@/lib/schedule-utils";
+import {
+  getTodayMonthStr,
+  getDayName,
+  getTurnColorClass,
+  applyHolidayTurnRulesByStaffKey,
+} from "@/lib/schedule-utils";
 import { cn } from "@/lib/utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
@@ -68,6 +76,7 @@ export interface SettingsSnapshot {
   freezeDate: string | null;
   weekendHolidayTurns: string[];
   jigeunNumberTurns: string[];
+  holidayTurnRules: HolidayTurnRule[];
 }
 
 interface RequestsPanelProps {
@@ -97,6 +106,7 @@ export function RequestsPanel({
   const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
     DEFAULT_JIGEUN_NUMBER_TURNS
   );
+  const [holidays, setHolidays] = useState<Set<string>>(new Set());
 
   // 전체 삭제 확인 모달 상태
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
@@ -126,26 +136,36 @@ export function RequestsPanel({
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
 
     try {
-      const [{ data: schedules, error: qErr }, scheduleResult, settingsResult] =
-        await Promise.all([
-          supabase
-            .from("special_schedules")
-            .select("id, staff_id, target_date, record_type, created_at")
-            .gte("target_date", start)
-            .lte("target_date", end)
-            .order("target_date", { ascending: true }),
-          supabase
-            .rpc("get_schedule_by_range", {
-              p_start_date: start,
-              p_end_date: end,
-            })
-            .range(0, 10000),
-          supabase
-            .from("app_settings")
-            .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_number_turns")
-            .eq("id", 1)
-            .maybeSingle(),
-        ]);
+      const [
+        { data: schedules, error: qErr },
+        scheduleResult,
+        settingsResult,
+        holidayResult,
+      ] = await Promise.all([
+        supabase
+          .from("special_schedules")
+          .select("id, staff_id, target_date, record_type, created_at")
+          .gte("target_date", start)
+          .lte("target_date", end)
+          .order("target_date", { ascending: true }),
+        supabase
+          .rpc("get_schedule_by_range", {
+            p_start_date: start,
+            p_end_date: end,
+          })
+          .range(0, 10000),
+        supabase
+          .from("app_settings")
+          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules")
+          .eq("id", 1)
+          .maybeSingle(),
+        supabase
+          .from("holidays")
+          .select("locdate")
+          .eq("is_holiday", "Y")
+          .gte("locdate", start)
+          .lte("locdate", end),
+      ]);
 
       if (qErr) throw qErr;
       if (scheduleResult.error) throw scheduleResult.error;
@@ -158,6 +178,7 @@ export function RequestsPanel({
         request_freeze_date: string | null;
         weekend_holiday_turns: string | null;
         jigeun_number_turns: string | null;
+        holiday_turn_rules: string | null;
       } | null;
       const caps = s
         ? {
@@ -174,6 +195,9 @@ export function RequestsPanel({
       const jigeunTurns = s
         ? parseTurnsText(s.jigeun_number_turns)
         : DEFAULT_JIGEUN_NUMBER_TURNS;
+      const holidayRules = s
+        ? parseHolidayTurnRulesText(s.holiday_turn_rules)
+        : DEFAULT_HOLIDAY_TURN_RULES;
       setWeekendHolidayTurns(turns);
       setJigeunNumberTurns(jigeunTurns);
       onSettingsLoadedRef.current?.({
@@ -181,7 +205,14 @@ export function RequestsPanel({
         freezeDate,
         weekendHolidayTurns: turns,
         jigeunNumberTurns: jigeunTurns,
+        holidayTurnRules: holidayRules,
       });
+
+      // 연휴 짝 치환 판정에 필요 — state 반영 전에 로컬 Set 으로 먼저 사용
+      const holidaySet = new Set<string>(
+        (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
+      );
+      setHolidays(holidaySet);
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑
       const scheduleRows = (scheduleResult.data ?? []) as ScheduleRecord[];
@@ -192,6 +223,13 @@ export function RequestsPanel({
           : "";
         if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
       }
+      // 표시·엑셀용 치환 맵. 자동 지근 판정(아래)은 반드시 원본 turn 을 써야 하므로
+      // regularMap 은 그대로 두고 별도 맵으로 분리한다.
+      const displayRegularMap = applyHolidayTurnRulesByStaffKey(
+        regularMap,
+        holidaySet,
+        holidayRules
+      );
 
       const list = (schedules ?? []) as Array<{
         id: string;
@@ -210,6 +248,8 @@ export function RequestsPanel({
       const requestedKeys = new Set(
         list.map((s) => `${s.staff_id}|${s.target_date}`)
       );
+      // 주의: 지근 번호 판정은 연휴 치환 전의 '원래' turn 으로 해야 한다.
+      // 치환된 코드(휴73 등)로 매칭하면 자동 지근 대상이 달라진다.
       for (const row of scheduleRows) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
@@ -258,7 +298,9 @@ export function RequestsPanel({
             staff_position: emp?.staff_position ?? "",
             employee_number: emp?.employee_number ?? null,
             target_date: e.target_date,
-            regularTurn: e.turn,
+            // 표시용은 치환 후 값 (판정은 위에서 원본 turn 으로 이미 끝남)
+            regularTurn:
+              displayRegularMap.get(`${e.staff_id}|${e.target_date}`) ?? e.turn,
           };
         })
       );
@@ -268,7 +310,8 @@ export function RequestsPanel({
         employee: empMap.get(s.staff_id) ?? null,
         _draftDate: s.target_date,
         _draftType: s.record_type,
-        regularTurn: regularMap.get(`${s.staff_id}|${s.target_date}`) ?? null,
+        regularTurn:
+          displayRegularMap.get(`${s.staff_id}|${s.target_date}`) ?? null,
       }));
       setRows(mapped);
     } catch (err) {
@@ -472,7 +515,7 @@ export function RequestsPanel({
           이름: r.staff_name ?? "",
           날짜: r.target_date,
           요일: getDayName(r.target_date),
-          "원래 근무": r.regularTurn ?? "",
+          근무: r.regularTurn ?? "",
           구분: r.record_type,
           신청일시: r.created_at
             ? new Date(r.created_at).toLocaleString("ko-KR")
@@ -618,7 +661,7 @@ export function RequestsPanel({
                 <TableHead className="text-center">직책</TableHead>
                 <TableHead className="text-center">이름</TableHead>
                 <TableHead className="text-center">날짜</TableHead>
-                <TableHead className="text-center">원래 근무</TableHead>
+                <TableHead className="text-center">근무</TableHead>
                 <TableHead className="text-center">구분</TableHead>
                 <TableHead className="text-center">작업</TableHead>
                 <TableHead className="text-center">사번</TableHead>
@@ -666,7 +709,7 @@ export function RequestsPanel({
                         ? getTurnColorClass(
                             row.regularTurn,
                             row.target_date,
-                            undefined,
+                            holidays,
                             weekendHolidayTurns,
                             jigeunNumberTurns
                           )

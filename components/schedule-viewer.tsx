@@ -2,11 +2,17 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import type { ScheduleRecord, PositionTab } from "@/lib/types";
+import type {
+  ScheduleRecord,
+  PositionTab,
+  HolidayTurnRule,
+} from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
+  parseHolidayTurnRulesText,
 } from "@/lib/types";
 import {
   getTodayMonthStr,
@@ -14,6 +20,7 @@ import {
   computeScheduleRange,
   computeInitialRange,
   buildScheduleMap,
+  applyHolidayTurnRules,
 } from "@/lib/schedule-utils";
 import { ScheduleControls } from "@/components/schedule-controls";
 import { ScheduleTable } from "@/components/schedule-table";
@@ -33,6 +40,9 @@ export function ScheduleViewer() {
   );
   const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
     DEFAULT_JIGEUN_NUMBER_TURNS
+  );
+  const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
+    DEFAULT_HOLIDAY_TURN_RULES
   );
   const [maintenance, setMaintenance] = useState<{
     is_active: boolean;
@@ -59,7 +69,7 @@ export function ScheduleViewer() {
           .lte("locdate", end),
         supabase
           .from("app_settings")
-          .select("weekend_holiday_turns, jigeun_number_turns")
+          .select("weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules")
           .eq("id", 1)
           .maybeSingle(),
       ]);
@@ -74,12 +84,18 @@ export function ScheduleViewer() {
       const settings = settingsResult.data as {
         weekend_holiday_turns: string | null;
         jigeun_number_turns: string | null;
+        holiday_turn_rules: string | null;
       } | null;
       setWeekendHolidayTurns(
         settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
       setJigeunNumberTurns(
         settings ? parseTurnsText(settings.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
+      );
+      setHolidayTurnRules(
+        settings
+          ? parseHolidayTurnRulesText(settings.holiday_turn_rules)
+          : DEFAULT_HOLIDAY_TURN_RULES
       );
 
       if (!scheduleResult.data || scheduleResult.data.length === 0) {
@@ -133,10 +149,16 @@ export function ScheduleViewer() {
     fetchSchedule(range.start, range.end);
   }, [monthValue, fetchSchedule]);
 
-  const { names, scheduleMap } = useMemo(
-    () => buildScheduleMap(allData, selectedTab, searchFilter),
-    [allData, selectedTab, searchFilter]
-  );
+  // 표 표시용 — 직원별 근무 맵에 연휴 짝 치환을 적용한다.
+  const { names, scheduleMap } = useMemo(() => {
+    const built = buildScheduleMap(allData, selectedTab, searchFilter);
+    if (holidayTurnRules.length === 0) return built;
+    const substituted = new Map<string, Map<string, string>>();
+    for (const [name, m] of built.scheduleMap) {
+      substituted.set(name, applyHolidayTurnRules(m, holidays, holidayTurnRules));
+    }
+    return { names: built.names, scheduleMap: substituted };
+  }, [allData, selectedTab, searchFilter, holidays, holidayTurnRules]);
 
   const emptyMessage = useMemo(() => {
     if (isLoading || error) return null;

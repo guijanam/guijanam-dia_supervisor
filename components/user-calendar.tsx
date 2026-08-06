@@ -3,11 +3,18 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
-import type { RecordType, ScheduleRecord, SpecialSchedule } from "@/lib/types";
+import type {
+  RecordType,
+  ScheduleRecord,
+  SpecialSchedule,
+  HolidayTurnRule,
+} from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
+  parseHolidayTurnRulesText,
 } from "@/lib/types";
 import {
   getTodayMonthStr,
@@ -16,6 +23,8 @@ import {
   getDayColorClass,
   getTurnColorClass,
   getDayName,
+  applyHolidayTurnRules,
+  applyHolidayTurnRulesByStaffKey,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -61,6 +70,9 @@ export function UserCalendar() {
   const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
     DEFAULT_JIGEUN_NUMBER_TURNS
   );
+  const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
+    DEFAULT_HOLIDAY_TURN_RULES
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -97,6 +109,13 @@ export function UserCalendar() {
     return { hueCount, weekendTurnCount, jigeunCount, jihyuCount, totalRest };
   }, [regularMap, specialMap, holidays, monthValue, weekendHolidayTurns, jigeunNumberTurns]);
 
+  // 화면 표시용 근무 맵(연휴 짝 치환 적용).
+  // 위 monthStats 는 원본 regularMap 을 그대로 쓴다 — 집계는 원래 근무번호 기준.
+  const displayTurnMap = useMemo(
+    () => applyHolidayTurnRules(regularMap, holidays, holidayTurnRules),
+    [regularMap, holidays, holidayTurnRules]
+  );
+
   const fetchData = useCallback(async () => {
     if (!employee) return;
     setIsLoading(true);
@@ -129,7 +148,7 @@ export function UserCalendar() {
             .lte("locdate", end),
           supabase
             .from("app_settings")
-            .select("request_freeze_date, weekend_holiday_turns, jigeun_number_turns")
+            .select("request_freeze_date, weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -141,6 +160,7 @@ export function UserCalendar() {
         request_freeze_date: string | null;
         weekend_holiday_turns: string | null;
         jigeun_number_turns: string | null;
+        holiday_turn_rules: string | null;
       } | null;
       setRequestFreezeDate(settings?.request_freeze_date ?? null);
       setWeekendHolidayTurns(
@@ -148,6 +168,15 @@ export function UserCalendar() {
       );
       setJigeunNumberTurns(
         settings ? parseTurnsText(settings.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
+      );
+      const holidayRules = settings
+        ? parseHolidayTurnRulesText(settings.holiday_turn_rules)
+        : DEFAULT_HOLIDAY_TURN_RULES;
+      setHolidayTurnRules(holidayRules);
+
+      // 연휴 짝 치환 판정에 필요 — holidays state 반영 전이라 로컬 Set 을 먼저 만든다.
+      const holidaySet = new Set<string>(
+        (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
       );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑 (전 직원)
@@ -164,6 +193,13 @@ export function UserCalendar() {
         }
       }
       setRegularMap(rMap);
+
+      // 동료 신청 내역에 표시되는 근무도 동일하게 치환한다.
+      const displayByStaff = applyHolidayTurnRulesByStaffKey(
+        regularByStaff,
+        holidaySet,
+        holidayRules
+      );
 
       const list = (specialResult.data ?? []) as Array<{
         id: string;
@@ -219,7 +255,7 @@ export function UserCalendar() {
           staff_position: position,
           record_type: row.record_type,
           regularTurn:
-            regularByStaff.get(`${row.staff_id}|${row.target_date}`) ?? null,
+            displayByStaff.get(`${row.staff_id}|${row.target_date}`) ?? null,
         };
         const arr = aMap.get(row.target_date);
         if (arr) arr.push(entry);
@@ -227,11 +263,7 @@ export function UserCalendar() {
       }
       setAllEntriesMap(aMap);
 
-      setHolidays(
-        new Set<string>(
-          (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
-        )
-      );
+      setHolidays(holidaySet);
     } catch (err) {
       setError(err instanceof Error ? err.message : "데이터 로딩 실패");
     } finally {
@@ -344,7 +376,7 @@ export function UserCalendar() {
           ))}
           {grid.map((date) => {
             const inMonth = isSameMonth(date, monthValue);
-            const turn = regularMap.get(date);
+            const turn = displayTurnMap.get(date);
             const entries = allEntriesMap.get(date) ?? [];
             const turnBgClass = turn
               ? getTurnColorClass(
@@ -441,7 +473,9 @@ export function UserCalendar() {
       <DayModal
         employee={employee}
         date={selectedDate}
-        regularTurn={selectedDate ? regularMap.get(selectedDate) ?? null : null}
+        regularTurn={
+          selectedDate ? displayTurnMap.get(selectedDate) ?? null : null
+        }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
         isFrozen={isFrozen}

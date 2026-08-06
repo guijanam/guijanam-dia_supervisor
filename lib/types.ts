@@ -64,15 +64,17 @@ export const DEFAULT_JIGEUN_CAPS: JigeunCaps = {
   holiday: 4,
 };
 
-// 앱 설정 집합: 지근 정원 + 신청 마감일 + 운휴 번호 + 지근 번호.
+// 앱 설정 집합: 지근 정원 + 신청 마감일 + 운휴 번호 + 지근 번호 + 연휴 근무 치환.
 // requestFreezeDate 가 'YYYY-MM-DD' 이고 오늘이 그 이후이면 사용자 신청·삭제 차단.
 // weekendHolidayTurns 는 주말/공휴일에 운휴로 집계되는 근무번호 목록(승무소별 상이).
 // jigeunNumberTurns 는 요일/공휴일과 무관하게 지근으로 표시되는 근무번호 목록.
+// holidayTurnRules 는 연속 이틀이 모두 휴일일 때 표시만 바꾸는 근무번호 짝 규칙.
 export interface AppSettings {
   caps: JigeunCaps;
   requestFreezeDate: string | null;
   weekendHolidayTurns: string[];
   jigeunNumberTurns: string[];
+  holidayTurnRules: HolidayTurnRule[];
 }
 
 export const DEFAULT_WEEKEND_HOLIDAY_TURNS: string[] = [
@@ -86,6 +88,64 @@ export const DEFAULT_WEEKEND_HOLIDAY_TURNS: string[] = [
 ];
 
 export const DEFAULT_JIGEUN_NUMBER_TURNS: string[] = [];
+
+// 연휴(토/일/공휴일) 이틀 연속일 때만 치환되는 근무번호 짝.
+// 예: ('58','58~') 가 연속 이틀 모두 휴일이면 그 이틀을 ('휴73','휴74') 로 표시.
+// 표시 전용이며 통계(휴무/운휴/총휴/분기밸런스)는 항상 원래 turn 을 사용한다.
+export interface HolidayTurnRule {
+  fromA: string; // N일 원래 근무번호
+  fromB: string; // N+1일 원래 근무번호
+  toA: string; // N일 표시 근무번호
+  toB: string; // N+1일 표시 근무번호
+}
+
+export const DEFAULT_HOLIDAY_TURN_RULES: HolidayTurnRule[] = [];
+
+// '58,58~:휴73,휴74;62,62~:휴75,휴76' ↔ HolidayTurnRule[]
+// 형식이 깨진 그룹은 조용히 버린다(전체 실패 금지 — 잘못 저장된 설정 하나가
+// 전 직원 근무표를 못 그리게 만들면 안 됨). 저장 시점 검증은 validate 쪽에서.
+export function parseHolidayTurnRulesText(
+  raw: string | null | undefined
+): HolidayTurnRule[] {
+  if (!raw) return [];
+  const rules: HolidayTurnRule[] = [];
+  for (const group of raw.split(";")) {
+    const g = group.trim();
+    if (!g) continue;
+    const parts = g.split(":");
+    if (parts.length !== 2) continue;
+    const from = parts[0].split(",").map((t) => t.trim());
+    const to = parts[1].split(",").map((t) => t.trim());
+    if (from.length !== 2 || to.length !== 2) continue;
+    if (from.some((t) => !t) || to.some((t) => !t)) continue;
+    rules.push({ fromA: from[0], fromB: from[1], toA: to[0], toB: to[1] });
+  }
+  return rules;
+}
+
+export function formatHolidayTurnRulesText(rules: HolidayTurnRule[]): string {
+  return rules.map((r) => `${r.fromA},${r.fromB}:${r.toA},${r.toB}`).join(";");
+}
+
+// 관리자 저장 시 보여줄 검증 메시지. null 이면 통과.
+// parse 가 버린 그룹 수를 세어 조용한 데이터 손실을 알린다.
+export function validateHolidayTurnRulesText(raw: string): string | null {
+  const groups = raw
+    .split(";")
+    .map((g) => g.trim())
+    .filter((g) => g.length > 0);
+  const parsed = parseHolidayTurnRulesText(raw);
+  if (groups.length !== parsed.length) {
+    return "형식이 올바르지 않습니다. 예: 58,58~:휴73,휴74;62,62~:휴75,휴76";
+  }
+  const seen = new Set<string>();
+  for (const r of parsed) {
+    const key = `${r.fromA}|${r.fromB}`;
+    if (seen.has(key)) return `중복된 짝이 있습니다: ${r.fromA},${r.fromB}`;
+    seen.add(key);
+  }
+  return null;
+}
 
 // 쉼표 텍스트('31,32,33') ↔ 배열 변환 유틸. 공백/빈 토큰은 제거.
 export function parseTurnsText(raw: string | null | undefined): string[] {

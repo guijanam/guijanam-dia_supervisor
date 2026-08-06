@@ -3,13 +3,17 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
-import type { JigeunCaps } from "@/lib/types";
+import type { JigeunCaps, HolidayTurnRule } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   formatTurnsText,
+  parseHolidayTurnRulesText,
+  formatHolidayTurnRulesText,
+  validateHolidayTurnRulesText,
 } from "@/lib/types";
 import {
   Dialog,
@@ -34,6 +38,7 @@ interface Props {
   freezeDate: string | null;
   weekendHolidayTurns: string[];
   jigeunNumberTurns: string[];
+  holidayTurnRules: HolidayTurnRule[];
   onSaved: () => void;
 }
 
@@ -42,6 +47,7 @@ export function JigeunCapSettings({
   freezeDate,
   weekendHolidayTurns,
   jigeunNumberTurns,
+  holidayTurnRules,
   onSaved,
 }: Props) {
   const { isAdmin, employee } = useAuth();
@@ -57,6 +63,9 @@ export function JigeunCapSettings({
   const [draftJigeunTurnsText, setDraftJigeunTurnsText] = useState<string>(
     formatTurnsText(jigeunNumberTurns)
   );
+  const [draftHolidayRulesText, setDraftHolidayRulesText] = useState<string>(
+    formatHolidayTurnRulesText(holidayTurnRules)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,9 +76,17 @@ export function JigeunCapSettings({
       setDraftFreezeDate(freezeDate ?? "");
       setDraftTurnsText(formatTurnsText(weekendHolidayTurns));
       setDraftJigeunTurnsText(formatTurnsText(jigeunNumberTurns));
+      setDraftHolidayRulesText(formatHolidayTurnRulesText(holidayTurnRules));
       setError(null);
     }
-  }, [open, caps, freezeDate, weekendHolidayTurns, jigeunNumberTurns]);
+  }, [
+    open,
+    caps,
+    freezeDate,
+    weekendHolidayTurns,
+    jigeunNumberTurns,
+    holidayTurnRules,
+  ]);
 
   if (!isAdmin || !employee) return null;
 
@@ -82,11 +99,21 @@ export function JigeunCapSettings({
   };
 
   const save = async () => {
+    // 연휴 근무 규칙은 형식이 깨지면 조용히 버려지므로 저장 전에 먼저 알린다.
+    const ruleError = validateHolidayTurnRulesText(draftHolidayRulesText);
+    if (ruleError) {
+      setError(ruleError);
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
       const normalizedTurns = parseTurnsText(draftTurnsText);
       const normalizedJigeunTurns = parseTurnsText(draftJigeunTurnsText);
+      const normalizedHolidayRules = parseHolidayTurnRulesText(
+        draftHolidayRulesText
+      );
       const { error: upErr } = await supabase
         .from("app_settings")
         .update({
@@ -97,6 +124,9 @@ export function JigeunCapSettings({
           request_freeze_date: draftFreezeDate ? draftFreezeDate : null,
           weekend_holiday_turns: formatTurnsText(normalizedTurns),
           jigeun_number_turns: formatTurnsText(normalizedJigeunTurns),
+          holiday_turn_rules: formatHolidayTurnRulesText(
+            normalizedHolidayRules
+          ),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -218,6 +248,27 @@ export function JigeunCapSettings({
             </p>
           </div>
 
+          <div className="flex flex-col gap-1 pt-2 border-t">
+            <div className="flex items-start gap-3">
+              <label className="w-16 text-sm font-medium pt-2">연휴 근무</label>
+              <Input
+                type="text"
+                className="h-9"
+                placeholder="예: 58,58~:휴73,휴74"
+                value={draftHolidayRulesText}
+                disabled={isSaving}
+                onChange={(e) => setDraftHolidayRulesText(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground pl-[4.75rem]">
+              연속된 이틀이 <b>모두</b> 토/일/공휴일일 때만 표시가 바뀝니다.
+              형식은 <code>원래A,원래B:표시A,표시B</code> 이며 여러 짝은{" "}
+              <code>;</code> 로 구분합니다. 한쪽만 휴일이면 치환되지 않고, 달이
+              바뀌는 지점에 걸친 짝도 치환되지 않습니다. 표시만 바뀔 뿐
+              휴무/운휴/총휴 집계는 원래 근무번호 기준 그대로입니다.
+            </p>
+          </div>
+
           <div className="grid grid-cols-3 gap-2">
             <Button
               variant="ghost"
@@ -225,6 +276,9 @@ export function JigeunCapSettings({
                 setDraft(DEFAULT_JIGEUN_CAPS);
                 setDraftTurnsText(formatTurnsText(DEFAULT_WEEKEND_HOLIDAY_TURNS));
                 setDraftJigeunTurnsText(formatTurnsText(DEFAULT_JIGEUN_NUMBER_TURNS));
+                setDraftHolidayRulesText(
+                  formatHolidayTurnRulesText(DEFAULT_HOLIDAY_TURN_RULES)
+                );
               }}
               disabled={isSaving}
               title="기본값(정원 4/2/4/4, 운휴 31~37)으로 되돌리기"

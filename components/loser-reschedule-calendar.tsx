@@ -6,6 +6,7 @@ import type {
   RecordType,
   LotteryStatus,
   ScheduleRecord,
+  HolidayTurnRule,
 } from "@/lib/types";
 import {
   getCalendarGrid,
@@ -13,6 +14,7 @@ import {
   getDayColorClass,
   getTurnColorClass,
   getDayName,
+  applyHolidayTurnRules,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -51,6 +53,7 @@ interface Props {
   initialMonth: string;
   weekendHolidayTurns: string[];
   jigeunNumberTurns: string[];
+  holidayTurnRules: HolidayTurnRule[];
   onClose: () => void;
   onMoved: () => void;
 }
@@ -62,6 +65,7 @@ export function LoserRescheduleCalendar({
   initialMonth,
   weekendHolidayTurns,
   jigeunNumberTurns,
+  holidayTurnRules,
   onClose,
   onMoved,
 }: Props) {
@@ -114,6 +118,10 @@ export function LoserRescheduleCalendar({
       if (scheduleResult.error) throw scheduleResult.error;
       if (specialResult.error) throw specialResult.error;
 
+      const holidaySet = new Set<string>(
+        (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
+      );
+
       const rMap = new Map<string, string>();
       for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
         if (row.staff_id !== entry.staff_id) continue;
@@ -122,7 +130,9 @@ export function LoserRescheduleCalendar({
           : "";
         if (dateStr) rMap.set(dateStr, row.turn);
       }
-      setRegularMap(rMap);
+      // 이 화면은 근무 표시 전용(집계 없음)이라 치환 결과를 그대로 상태에 담는다.
+      const displayMap = applyHolidayTurnRules(rMap, holidaySet, holidayTurnRules);
+      setRegularMap(displayMap);
 
       const mMap = new Map<string, MyEntry>();
       for (const row of (specialResult.data ?? []) as Array<{
@@ -136,22 +146,18 @@ export function LoserRescheduleCalendar({
           target_date: row.target_date,
           record_type: row.record_type,
           lottery_status: row.lottery_status,
-          regularTurn: rMap.get(row.target_date) ?? null,
+          regularTurn: displayMap.get(row.target_date) ?? null,
         });
       }
       setMineMap(mMap);
 
-      setHolidays(
-        new Set<string>(
-          (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
-        )
-      );
+      setHolidays(holidaySet);
     } catch (err) {
       setError(err instanceof Error ? err.message : "데이터 로딩 실패");
     } finally {
       setIsLoading(false);
     }
-  }, [entry, monthValue]);
+  }, [entry, monthValue, holidayTurnRules]);
 
   useEffect(() => {
     if (open && entry) {

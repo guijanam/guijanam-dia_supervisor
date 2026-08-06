@@ -1,5 +1,5 @@
 import { eachDayOfInterval, format, getDay, parse, startOfMonth, endOfMonth, addDays, startOfWeek, endOfWeek } from "date-fns";
-import type { ScheduleRecord, JigeunCaps } from "./types";
+import type { ScheduleRecord, JigeunCaps, HolidayTurnRule } from "./types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
@@ -151,4 +151,90 @@ export function buildScheduleMap(
 
   const names = [...nameMap.keys()].sort();
   return { names, scheduleMap: nameMap };
+}
+
+// 토/일/공휴일 판정. 앱 전체에서 동일한 술어를 쓰기 위한 헬퍼.
+function isWeekendOrHoliday(
+  dateString: string,
+  holidays?: Set<string>
+): boolean {
+  const dayName = getDayName(dateString);
+  return dayName === "토" || dayName === "일" || !!holidays?.has(dateString);
+}
+
+// 연휴 짝 치환(표시 전용).
+// (N일, N+1일) 이 모두 토/일/공휴일이고 두 날의 근무가 규칙의 (fromA, fromB) 와
+// 정확히 일치할 때만 두 날을 (toA, toB) 로 바꾼 새 Map 을 반환한다.
+// 한쪽만 휴일이거나 N+1일 데이터가 없으면(월말 경계 등) 치환하지 않는다.
+//
+// 주의: 통계(휴무/운휴/총휴/분기밸런스)는 반드시 원본 Map 을 계속 사용해야 한다.
+// 규칙이 없으면 입력 Map 을 그대로(참조 동일) 반환하므로 미설정 시 완전 무동작.
+export function applyHolidayTurnRules(
+  turnByDate: Map<string, string>,
+  holidays: Set<string> | undefined,
+  rules: HolidayTurnRule[]
+): Map<string, string> {
+  if (rules.length === 0 || turnByDate.size === 0) return turnByDate;
+
+  const result = new Map(turnByDate);
+  const dates = [...turnByDate.keys()].sort();
+  // 이미 짝으로 소비된 날짜는 다른 짝에 재사용하지 않는다(좌→우 greedy, 비중첩).
+  const consumed = new Set<string>();
+
+  for (const dateA of dates) {
+    if (consumed.has(dateA)) continue;
+    const turnA = turnByDate.get(dateA)!;
+    const dateB = format(
+      addDays(parse(dateA, "yyyy-MM-dd", new Date()), 1),
+      "yyyy-MM-dd"
+    );
+    const turnB = turnByDate.get(dateB);
+    if (turnB === undefined) continue; // N+1일 행 없음(조회 범위 밖 등)
+    if (consumed.has(dateB)) continue;
+    if (
+      !isWeekendOrHoliday(dateA, holidays) ||
+      !isWeekendOrHoliday(dateB, holidays)
+    ) {
+      continue; // 둘 다 휴일일 때만 치환
+    }
+    const rule = rules.find((r) => r.fromA === turnA && r.fromB === turnB);
+    if (!rule) continue;
+    result.set(dateA, rule.toA);
+    result.set(dateB, rule.toB);
+    consumed.add(dateA);
+    consumed.add(dateB);
+  }
+
+  return result;
+}
+
+// 'staffId|date' 키 맵용 래퍼. staff 별로 쪼개 치환한 뒤 다시 합친다.
+export function applyHolidayTurnRulesByStaffKey(
+  turnByStaffDate: Map<string, string>,
+  holidays: Set<string> | undefined,
+  rules: HolidayTurnRule[]
+): Map<string, string> {
+  if (rules.length === 0 || turnByStaffDate.size === 0) return turnByStaffDate;
+
+  const perStaff = new Map<string, Map<string, string>>();
+  for (const [key, turn] of turnByStaffDate) {
+    const i = key.indexOf("|");
+    if (i < 0) continue;
+    const staffId = key.slice(0, i);
+    const date = key.slice(i + 1);
+    let m = perStaff.get(staffId);
+    if (!m) {
+      m = new Map();
+      perStaff.set(staffId, m);
+    }
+    m.set(date, turn);
+  }
+
+  const out = new Map(turnByStaffDate);
+  for (const [staffId, m] of perStaff) {
+    const sub = applyHolidayTurnRules(m, holidays, rules);
+    if (sub === m) continue;
+    for (const [date, turn] of sub) out.set(`${staffId}|${date}`, turn);
+  }
+  return out;
 }

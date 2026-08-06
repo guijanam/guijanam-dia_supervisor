@@ -8,12 +8,15 @@ import type {
   ScheduleRecord,
   LotteryStatus,
   JigeunCaps,
+  HolidayTurnRule,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
+  parseHolidayTurnRulesText,
 } from "@/lib/types";
 import {
   getTodayMonthStr,
@@ -22,6 +25,7 @@ import {
   getDayColorClass,
   getDayName,
   getPositionCap,
+  applyHolidayTurnRulesByStaffKey,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -86,6 +90,9 @@ export function AdminCalendar() {
   );
   const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
     DEFAULT_JIGEUN_NUMBER_TURNS
+  );
+  const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
+    DEFAULT_HOLIDAY_TURN_RULES
   );
   const [reschedTarget, setReschedTarget] = useState<SpecialEntry | null>(null);
 
@@ -157,7 +164,7 @@ export function AdminCalendar() {
           supabase
             .from("app_settings")
             .select(
-              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns, jigeun_number_turns"
+              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules"
             )
             .eq("id", 1)
             .maybeSingle(),
@@ -173,6 +180,7 @@ export function AdminCalendar() {
         jigeun_cap_holiday: number;
         weekend_holiday_turns: string | null;
         jigeun_number_turns: string | null;
+        holiday_turn_rules: string | null;
       } | null;
       setCaps(
         s
@@ -190,6 +198,15 @@ export function AdminCalendar() {
       setJigeunNumberTurns(
         s ? parseTurnsText(s.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
       );
+      const holidayRules = s
+        ? parseHolidayTurnRulesText(s.holiday_turn_rules)
+        : DEFAULT_HOLIDAY_TURN_RULES;
+      setHolidayTurnRules(holidayRules);
+
+      // 연휴 짝 치환 판정에 필요 — holidays state 반영 전이라 로컬 Set 을 먼저 만든다.
+      const holidaySet = new Set<string>(
+        (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
+      );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑 — entry.regularTurn 채우기에만 사용.
       const regularMap = new Map<string, string>();
@@ -199,6 +216,12 @@ export function AdminCalendar() {
           : "";
         if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
       }
+      // 표시용 치환 맵 (연휴 짝 규칙 적용)
+      const displayRegularMap = applyHolidayTurnRulesByStaffKey(
+        regularMap,
+        holidaySet,
+        holidayRules
+      );
 
       const list = (specialResult.data ?? []) as Array<{
         id: string;
@@ -239,7 +262,7 @@ export function AdminCalendar() {
           staff_position: emp?.staff_position ?? "",
           record_type: row.record_type,
           regularTurn:
-            regularMap.get(`${row.staff_id}|${row.target_date}`) ?? null,
+            displayRegularMap.get(`${row.staff_id}|${row.target_date}`) ?? null,
           lottery_status: row.lottery_status ?? null,
           lottery_at: row.lottery_at ?? null,
         };
@@ -249,11 +272,7 @@ export function AdminCalendar() {
       }
       setSpecialMap(sMap);
 
-      setHolidays(
-        new Set<string>(
-          (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
-        )
-      );
+      setHolidays(holidaySet);
     } catch (err) {
       setError(err instanceof Error ? err.message : "데이터 로딩 실패");
     } finally {
@@ -861,6 +880,7 @@ export function AdminCalendar() {
         initialMonth={monthValue}
         weekendHolidayTurns={weekendHolidayTurns}
         jigeunNumberTurns={jigeunNumberTurns}
+        holidayTurnRules={holidayTurnRules}
         onClose={() => setReschedTarget(null)}
         onMoved={() => {
           void fetchData();
