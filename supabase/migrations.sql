@@ -385,3 +385,39 @@ GRANT EXECUTE ON FUNCTION check_device_vip(TEXT) TO anon, authenticated;
 -- ============================================================
 alter table public.app_settings
   add column if not exists holiday_turn_rules text not null default '';
+
+-- ============================================================
+-- 17) work_patterns (교번) 관리자 CRUD 허용 --------------------
+--  - work_patterns 는 이 레포의 SQL 이 만든 테이블이 아니다(기존 시스템 제공).
+--    구조: id uuid PK, pattern_name text, shift_types text[], created_at.
+--    coworker_list.pattern_id 가 work_patterns.id 를 참조한다.
+--  - shift_types 는 '순서가 의미를 갖는' 배열이다.
+--    get_schedule_by_range RPC 는 직원의 (reference_date, reference_shift)
+--    로 배열 인덱스를 찾아 하루에 한 칸씩 전진·순환시킨다.
+--      → 원소 삽입/삭제/이동은 그 교번을 쓰는 전 직원의 근무표를 밀어버린다.
+--      → 원소 이름만 바꾸면 순환 중 그 한 칸만 바뀐다.
+--      → 어떤 직원의 reference_shift 가 배열에서 사라지면 그 직원 근무표는
+--        계산 불가가 된다(앵커 소실). 관리자 UI 에서 경고한다.
+--  - 지금까지 이 테이블은 RPC 내부에서만 읽혔고 클라이언트가 직접
+--    조회·수정한 적이 없다. 관리자 UI(교번관리) 추가로 anon 에
+--    select/insert/update/delete 가 필요해졌다.
+--  - 보안 수준은 섹션 12 와 동일한 anon-permissive. 한계도 동일하다
+--    (Supabase Auth 미사용 → auth.uid() 기반 RLS 불가). 권한은
+--    클라이언트의 employee.role === 'admin' 으로만 통제된다.
+--  - 주의: RLS 가 현재 꺼져 있다면 enable 과 create policy 사이에 읽기가
+--    끊기는 순간이 생긴다. SQL Editor 에서 이 블록 전체를 한 번에 실행할 것.
+--    사전 확인: select relrowsecurity from pg_class where relname='work_patterns';
+-- ============================================================
+alter table public.work_patterns enable row level security;
+drop policy if exists work_patterns_read   on public.work_patterns;
+drop policy if exists work_patterns_insert on public.work_patterns;
+drop policy if exists work_patterns_update on public.work_patterns;
+drop policy if exists work_patterns_delete on public.work_patterns;
+create policy work_patterns_read   on public.work_patterns for select using (true);
+create policy work_patterns_insert on public.work_patterns for insert with check (true);
+create policy work_patterns_update on public.work_patterns for update using (true) with check (true);
+create policy work_patterns_delete on public.work_patterns for delete using (true);
+
+-- 교번별 사용 직원 수 / 앵커 목록 조회용
+create index if not exists coworker_list_pattern_idx
+  on public.coworker_list (pattern_id);

@@ -220,3 +220,15 @@ export interface DocumentVote {
 export interface DocumentVoteWithEmployee extends DocumentVote {
   employee: Pick<Employee, "staff_name" | "staff_position"> | null;
 }
+
+// 교번(근무순서) 패턴. work_patterns 테이블.
+// shift_types 는 순서가 의미를 갖는 배열이다: get_schedule_by_range RPC 가
+// 직원의 기준 근무번호(reference_shift)가 이 배열의 어느 인덱스인지 찾아,
+// 하루에 한 칸씩 전진하며 순환시켜 근무표를 만든다.
+// → 원소 삽입/삭제/이동은 이 교번을 쓰는 전 직원의 근무표를 밀어버린다.
+export interface WorkPattern {
+  id: string;
+  pattern_name: string;
+  shift_types: string[];
+  created_at: string;
+}

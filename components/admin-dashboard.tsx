@@ -20,6 +20,7 @@ import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import { RequestsPanel } from "@/components/admin-panels/requests-panel";
 import { PinResetPanel } from "@/components/admin-panels/pin-reset-panel";
 import { ReferenceEditPanel } from "@/components/admin-panels/reference-edit-panel";
+import { WorkPatternPanel } from "@/components/admin-panels/work-pattern-panel";
 import {
   LogOut,
   KeyRound,
@@ -28,9 +29,16 @@ import {
   FileText,
   Users,
   ClipboardList,
+  Repeat,
 } from "lucide-react";
 
-type AdminPage = "requests" | "announce" | "document" | "pin" | "reference";
+type AdminPage =
+  | "requests"
+  | "announce"
+  | "document"
+  | "pin"
+  | "reference"
+  | "patterns";
 
 function SidebarItem({
   icon: Icon,
@@ -165,7 +173,7 @@ export function AdminDashboard() {
           />
           <SidebarItem
             icon={CalendarCog}
-            label="교번순서 수정"
+            label="직원근무 수정"
             active={page === "reference"}
             onClick={() => setPage("reference")}
           />
@@ -173,6 +181,12 @@ export function AdminDashboard() {
             icon={Users}
             label="직원명단 관리"
             onClick={() => window.open(STAFF_EDIT_URL, "_blank", "noopener")}
+          />
+          <SidebarItem
+            icon={Repeat}
+            label="교번관리"
+            active={page === "patterns"}
+            onClick={() => setPage("patterns")}
           />
         </aside>
 
@@ -216,6 +230,7 @@ export function AdminDashboard() {
           )}
           {page === "pin" && <PinResetPanel />}
           {page === "reference" && <ReferenceEditPanel />}
+          {page === "patterns" && <WorkPatternPanel />}
         </main>
       </div>
     </div>
