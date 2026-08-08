@@ -41,6 +41,18 @@ export function getDayColorClass(dateString: string, holidays?: Set<string>): st
   return "";
 }
 
+// getDayColorClass 의 엑셀(ExcelJS) 버전. 색이 없으면 null.
+export function getDayExcelColor(
+  dateString: string,
+  holidays?: Set<string>
+): string | null {
+  if (holidays?.has(dateString)) return "FFDC2626";
+  const dayName = getDayName(dateString);
+  if (dayName === "토") return "FF2563EB";
+  if (dayName === "일") return "FFDC2626";
+  return null;
+}
+
 // 요일/공휴일 구분별 지근 정원 (직책 공통).
 // 우선순위: 공휴일 > 토 > 일 > 평일. caps 미전달 시 기본값 사용.
 export function getPositionCap(
