@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
 import type {
   RecordType,
@@ -21,6 +21,7 @@ import {
 import {
   getTodayMonthStr,
   getDayName,
+  getDayExcelColor,
   getTurnColorClass,
   applyHolidayTurnRulesByStaffKey,
 } from "@/lib/schedule-utils";
@@ -70,6 +71,13 @@ interface JigeunNumberRow {
   regularTurn: string;
 }
 
+// 연휴 짝 치환(holiday_turn_rules) 결과가 '지정(야)' 인 근무.
+// 신청 없이 자동으로 지근에 포함되며, JigeunNumberRow 와 같은 행 포맷을 쓴다.
+const DESIGNATED_NIGHT_TURN = "지정(야)";
+
+// 엑셀에서 제외할 근무번호. 해당 근무인 사람은 지근/지휴 어느 칸에도 표시하지 않는다.
+const EXCLUDED_EXPORT_TURNS = ["휴72"];
+
 // 헤더(freezeDate 배지)·JigeunCapSettings 가 쓰는 설정 묶음
 export interface SettingsSnapshot {
   caps: JigeunCaps;
@@ -97,6 +105,9 @@ export function RequestsPanel({
   >("전체");
   const [rows, setRows] = useState<Row[]>([]);
   const [jigeunNumberRows, setJigeunNumberRows] = useState<JigeunNumberRow[]>([]);
+  const [designatedNightRows, setDesignatedNightRows] = useState<
+    JigeunNumberRow[]
+  >([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -263,6 +274,29 @@ export function RequestsPanel({
         });
       }
 
+      // 연휴 짝 치환 결과가 '지정(야)' 인 (staff_id, 날짜).
+      // 치환 후 값이라 displayRegularMap 을 봐야 하며, 신청/자동 지근과 겹치면 제외.
+      const designatedEntries: Array<{
+        staff_id: number;
+        target_date: string;
+        turn: string;
+      }> = [];
+      const jigeunNumberKeys = new Set(
+        jigeunNumberEntries.map((e) => `${e.staff_id}|${e.target_date}`)
+      );
+      for (const [key, turn] of displayRegularMap) {
+        if (turn !== DESIGNATED_NIGHT_TURN) continue;
+        if (requestedKeys.has(key) || jigeunNumberKeys.has(key)) continue;
+        const i = key.indexOf("|");
+        if (i < 0) continue;
+        designatedEntries.push({
+          staff_id: Number(key.slice(0, i)),
+          target_date: key.slice(i + 1),
+          // 치환 전 원래 근무번호(58 등). regularMap 은 치환하지 않은 원본이다.
+          turn: regularMap.get(key) ?? turn,
+        });
+      }
+
       // staff_id → coworker_list 정보 매핑 (FK 임베딩 대신 별도 조회)
       const empMap = new Map<
         number,
@@ -272,6 +306,7 @@ export function RequestsPanel({
         ...new Set([
           ...list.map((s) => s.staff_id),
           ...jigeunNumberEntries.map((e) => e.staff_id),
+          ...designatedEntries.map((e) => e.staff_id),
         ]),
       ];
       if (ids.length > 0) {
@@ -301,6 +336,20 @@ export function RequestsPanel({
             // 표시용은 치환 후 값 (판정은 위에서 원본 turn 으로 이미 끝남)
             regularTurn:
               displayRegularMap.get(`${e.staff_id}|${e.target_date}`) ?? e.turn,
+          };
+        })
+      );
+
+      setDesignatedNightRows(
+        designatedEntries.map((e) => {
+          const emp = empMap.get(e.staff_id);
+          return {
+            staff_id: e.staff_id,
+            staff_name: emp?.staff_name ?? `(미상 ${e.staff_id})`,
+            staff_position: emp?.staff_position ?? "",
+            employee_number: emp?.employee_number ?? null,
+            target_date: e.target_date,
+            regularTurn: e.turn,
           };
         })
       );
@@ -461,11 +510,11 @@ export function RequestsPanel({
     }
   };
 
-  const exportExcel = () => {
-    const wb = XLSX.utils.book_new();
+  const exportExcel = async () => {
+    const wb = new ExcelJS.Workbook();
 
     const f = nameFilter.trim().toLowerCase();
-    const filteredJigeunNumberRows = jigeunNumberRows.filter((r) => {
+    const matchesFilter = (r: JigeunNumberRow) => {
       if (positionFilter !== "전체" && r.staff_position !== positionFilter)
         return false;
       return (
@@ -473,7 +522,9 @@ export function RequestsPanel({
         r.staff_name.toLowerCase().includes(f) ||
         String(r.employee_number ?? "").toLowerCase().includes(f)
       );
-    });
+    };
+    const filteredJigeunNumberRows = jigeunNumberRows.filter(matchesFilter);
+    const filteredDesignatedRows = designatedNightRows.filter(matchesFilter);
 
     type ExportEntry = {
       employee_number: string | null;
@@ -503,38 +554,97 @@ export function RequestsPanel({
         regularTurn: r.regularTurn,
         record_type: "지근(번호)",
       })),
-    ];
+      ...filteredDesignatedRows.map((r) => ({
+        employee_number: r.employee_number,
+        staff_position: r.staff_position,
+        staff_name: r.staff_name,
+        target_date: r.target_date,
+        regularTurn: r.regularTurn,
+        record_type: DESIGNATED_NIGHT_TURN,
+      })),
+    ].filter((r) => !EXCLUDED_EXPORT_TURNS.includes(r.regularTurn ?? ""));
 
-    for (const pos of ["기관사", "차장"] as const) {
-      const sheetData = combined
-        .filter((r) => r.staff_position === pos)
-        .sort((a, b) => a.target_date.localeCompare(b.target_date))
-        .map((r) => ({
-          사번: r.employee_number ?? "",
-          직책: r.staff_position ?? "",
-          이름: r.staff_name ?? "",
-          날짜: r.target_date,
-          요일: getDayName(r.target_date),
-          근무: r.regularTurn ?? "",
-          구분: r.record_type,
-          신청일시: r.created_at
-            ? new Date(r.created_at).toLocaleString("ko-KR")
-            : "",
-        }));
-      const ws = XLSX.utils.json_to_sheet(sheetData);
-      ws["!cols"] = [
-        { wch: 10 },
-        { wch: 12 },
-        { wch: 8 },
-        { wch: 12 },
-        { wch: 6 },
-        { wch: 8 },
-        { wch: 22 },
-      ];
-      XLSX.utils.book_append_sheet(wb, ws, pos);
+    // 조회 월의 1일~말일 전체를 오름차순으로. 신청이 없는 날도 빈 행으로 남긴다.
+    const monthStart = startOfMonth(new Date(`${monthValue}-01T00:00:00`));
+    const monthEnd = endOfMonth(monthStart);
+    const allDates: string[] = [];
+    for (
+      let d = monthStart;
+      d <= monthEnd;
+      d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+    ) {
+      allDates.push(format(d, "yyyy-MM-dd"));
     }
 
-    XLSX.writeFile(wb, `지근지휴_${monthValue}.xlsx`);
+    // 한 셀에 들어갈 신청자 표기: 이름(근무번호). 근무번호가 없으면 이름만.
+    const formatEntry = (r: ExportEntry) =>
+      r.regularTurn ? `${r.staff_name}(${r.regularTurn})` : r.staff_name;
+
+    for (const pos of ["기관사", "차장"] as const) {
+      const byDate = new Map<string, { 지근: string[]; 지휴: string[] }>();
+      for (const r of combined) {
+        if (r.staff_position !== pos) continue;
+        let slot = byDate.get(r.target_date);
+        if (!slot) {
+          slot = { 지근: [], 지휴: [] };
+          byDate.set(r.target_date, slot);
+        }
+        // 자동 지근(지근 번호·연휴 치환 '지정(야)')도 지근 칸에 넣되 * 로 구분 표시.
+        // '지정(야)'는 regularTurn 에 치환 전 원래 근무번호가 들어있다: 이름(58/야).
+        if (r.record_type === "지휴") slot.지휴.push(formatEntry(r));
+        else if (r.record_type === DESIGNATED_NIGHT_TURN)
+          slot.지근.push(
+            r.regularTurn
+              ? `${r.staff_name}(${r.regularTurn}/야)*`
+              : `${r.staff_name}(야)*`
+          );
+        else if (r.record_type === "지근(번호)")
+          slot.지근.push(`${formatEntry(r)}*`);
+        else slot.지근.push(formatEntry(r));
+      }
+
+      // 날짜를 열로: 1열은 구분 라벨, 2열부터 날짜가 오름차순으로 이어진다.
+      const ws = wb.addWorksheet(pos);
+      ws.columns = [
+        { width: 8 },
+        ...allDates.map(() => ({ width: 14 })),
+      ];
+
+      const headerRow = ws.addRow([
+        "구분",
+        ...allDates.map((d) => `${d.slice(5)}(${getDayName(d)})`),
+      ]);
+      headerRow.font = { bold: true };
+      // 화면(getDayColorClass)과 동일한 규칙: 공휴일·일요일 빨강, 토요일 파랑.
+      allDates.forEach((date, i) => {
+        const color = getDayExcelColor(date, holidays);
+        if (color)
+          headerRow.getCell(i + 2).font = { bold: true, color: { argb: color } };
+      });
+
+      for (const type of ["지근", "지휴"] as const) {
+        const row = ws.addRow([
+          type,
+          ...allDates.map((d) => byDate.get(d)?.[type].join("\n") ?? ""),
+        ]);
+        row.getCell(1).font = { bold: true };
+        row.alignment = { wrapText: true, vertical: "top" };
+      }
+
+      ws.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(
+      new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `지근지휴_${monthValue}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const openDeleteAll = () => {
@@ -629,8 +739,18 @@ export function RequestsPanel({
         <Button
           size="sm"
           variant="outline"
-          onClick={exportExcel}
-          disabled={filtered.length === 0}
+          onClick={() => {
+            exportExcel().catch((err) =>
+              setError(
+                err instanceof Error ? err.message : "엑셀 생성 실패"
+              )
+            );
+          }}
+          disabled={
+            filtered.length === 0 &&
+            jigeunNumberRows.length === 0 &&
+            designatedNightRows.length === 0
+          }
         >
           <Download className="h-4 w-4" /> Excel 다운로드
         </Button>
