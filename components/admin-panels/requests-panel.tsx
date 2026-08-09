@@ -300,7 +300,12 @@ export function RequestsPanel({
       // staff_id → coworker_list 정보 매핑 (FK 임베딩 대신 별도 조회)
       const empMap = new Map<
         number,
-        { staff_name: string; employee_number: string | null; staff_position: string }
+        {
+          staff_name: string;
+          employee_number: string | null;
+          staff_position: string;
+          phone_number: string | null;
+        }
       >();
       const ids = [
         ...new Set([
@@ -312,7 +317,9 @@ export function RequestsPanel({
       if (ids.length > 0) {
         const { data: emps, error: eErr } = await supabase
           .from("coworker_list")
-          .select("staff_id, staff_name, employee_number, staff_position")
+          .select(
+            "staff_id, staff_name, employee_number, staff_position, phone_number"
+          )
           .in("staff_id", ids);
         if (eErr) throw eErr;
         for (const e of emps ?? []) {
@@ -320,6 +327,7 @@ export function RequestsPanel({
             staff_name: e.staff_name,
             employee_number: e.employee_number,
             staff_position: e.staff_position,
+            phone_number: e.phone_number,
           });
         }
       }
@@ -633,6 +641,50 @@ export function RequestsPanel({
 
       ws.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
     }
+
+    // 직원정보 시트 — 신청 건별 사번·전화번호·신청일시(special_schedules.created_at).
+    // 자동 지근(지근 번호·지정(야))은 신청 기록이 없어 created_at 이 없으므로 제외한다.
+    const infoSheet = wb.addWorksheet("직원정보");
+    infoSheet.columns = [
+      { header: "사번", width: 12 },
+      { header: "직책", width: 10 },
+      { header: "이름", width: 10 },
+      { header: "전화번호", width: 16 },
+      { header: "날짜", width: 14 },
+      { header: "구분", width: 8 },
+      { header: "신청일시", width: 22 },
+    ];
+    infoSheet.getRow(1).font = { bold: true };
+
+    const infoRows = filtered
+      .filter(
+        (r) =>
+          !EXCLUDED_EXPORT_TURNS.includes(r.regularTurn ?? "")
+      )
+      .slice()
+      .sort(
+        (a, b) =>
+          a.target_date.localeCompare(b.target_date) ||
+          (a.employee?.staff_name ?? "").localeCompare(
+            b.employee?.staff_name ?? ""
+          )
+      );
+
+    for (const r of infoRows) {
+      const row = infoSheet.addRow([
+        r.employee?.employee_number ?? "",
+        r.employee?.staff_position ?? "",
+        r.employee?.staff_name ?? "",
+        r.employee?.phone_number ?? "",
+        `${r.target_date}(${getDayName(r.target_date)})`,
+        r.record_type,
+        r.created_at ? new Date(r.created_at).toLocaleString("ko-KR") : "",
+      ]);
+      const color = getDayExcelColor(r.target_date, holidays);
+      if (color) row.getCell(5).font = { color: { argb: color } };
+    }
+
+    infoSheet.views = [{ state: "frozen", ySplit: 1 }];
 
     const buf = await wb.xlsx.writeBuffer();
     const url = URL.createObjectURL(
