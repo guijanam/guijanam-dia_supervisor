@@ -45,7 +45,7 @@ export interface SpecialSchedule {
 export interface SpecialScheduleWithEmployee extends SpecialSchedule {
   employee: Pick<
     Employee,
-    "staff_name" | "employee_number" | "staff_position"
+    "staff_name" | "employee_number" | "staff_position" | "phone_number"
   > | null;
 }
 
