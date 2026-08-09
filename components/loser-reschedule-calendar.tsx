@@ -371,7 +371,7 @@ export function LoserRescheduleCalendar({
                             }`
                   }
                   className={cn(
-                    "min-h-[64px] rounded-md border p-1 text-left transition-colors flex flex-col gap-0.5",
+                    "min-h-[48px] rounded-md border p-1 text-left transition-colors flex flex-col gap-0.5",
                     !inMonth && "opacity-30 pointer-events-none",
                     isRest && "border-red-300 dark:border-red-800",
                     turnBgClass,
@@ -382,21 +382,21 @@ export function LoserRescheduleCalendar({
                 >
                   <span
                     className={cn(
-                      "text-sm font-semibold leading-none",
+                      "text-[10px] font-semibold leading-none -ml-0.5 -mt-0.5",
                       getDayColorClass(date, holidays)
                     )}
                   >
                     {Number(date.slice(8, 10))}
                   </span>
                   {turn && (
-                    <span className="text-sm font-semibold truncate text-foreground">
+                    <span className="text-sm font-semibold truncate text-center text-foreground">
                       {turn}
                     </span>
                   )}
                   {mine && (
                     <span
                       className={cn(
-                        "self-start rounded px-1 text-[10px] font-bold leading-none",
+                        "self-start rounded px-1 text-[9px] font-bold leading-none",
                         mine.record_type === "지근"
                           ? "bg-green-200 text-green-800 dark:bg-green-900 dark:text-green-200"
                           : "bg-red-200 text-red-800 dark:bg-red-900 dark:text-red-200"

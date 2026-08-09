@@ -319,7 +319,7 @@ export function AdminEmployeeCalendarView({
             <div
               key={wd}
               className={cn(
-                "text-center text-sm font-bold py-1",
+                "text-center text-xs font-bold py-1",
                 i === 0 && "text-red-500",
                 i === 6 && "text-blue-500"
               )}
@@ -345,7 +345,7 @@ export function AdminEmployeeCalendarView({
                 key={date}
                 onClick={() => setSelectedDate(date)}
                 className={cn(
-                  "min-h-[64px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col",
+                  "min-h-[48px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col",
                   !inMonth && "opacity-35",
                   turnBgClass.includes("bg-red") &&
                     "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800",
@@ -355,14 +355,14 @@ export function AdminEmployeeCalendarView({
               >
                 <span
                   className={cn(
-                    "text-base font-semibold",
+                    "text-[10px] font-semibold leading-none -ml-0.5 -mt-0.5",
                     getDayColorClass(date, holidays)
                   )}
                 >
                   {Number(date.slice(8, 10))}
                 </span>
                 {turn && (
-                  <span className="text-base font-semibold truncate text-foreground">
+                  <span className="text-sm font-semibold truncate text-center text-foreground">
                     {turn}
                   </span>
                 )}
@@ -378,7 +378,7 @@ export function AdminEmployeeCalendarView({
                             : e.record_type
                         }
                         className={cn(
-                          "text-[10px] font-bold rounded px-1 truncate",
+                          "text-[9px] font-bold rounded px-1 truncate",
                           e.record_type === "지휴"
                             ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
                             : e.staff_position === "차장"
