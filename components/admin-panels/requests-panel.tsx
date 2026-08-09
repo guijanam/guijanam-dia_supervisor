@@ -71,9 +71,9 @@ interface JigeunNumberRow {
   regularTurn: string;
 }
 
-// 연휴 짝 치환(holiday_turn_rules) 결과가 '지정(야)' 인 근무.
+// 연휴 짝 치환(holiday_turn_rules) 결과가 '지(야)' 인 근무.
 // 신청 없이 자동으로 지근에 포함되며, JigeunNumberRow 와 같은 행 포맷을 쓴다.
-const DESIGNATED_NIGHT_TURN = "지정(야)";
+const DESIGNATED_NIGHT_TURN = "지(야)";
 
 // 엑셀에서 제외할 근무번호. 해당 근무인 사람은 지근/지휴 어느 칸에도 표시하지 않는다.
 const EXCLUDED_EXPORT_TURNS = ["휴72"];
@@ -274,7 +274,7 @@ export function RequestsPanel({
         });
       }
 
-      // 연휴 짝 치환 결과가 '지정(야)' 인 (staff_id, 날짜).
+      // 연휴 짝 치환 결과가 '지(야)' 인 (staff_id, 날짜).
       // 치환 후 값이라 displayRegularMap 을 봐야 하며, 신청/자동 지근과 겹치면 제외.
       const designatedEntries: Array<{
         staff_id: number;
@@ -589,8 +589,8 @@ export function RequestsPanel({
           slot = { 지근: [], 지휴: [] };
           byDate.set(r.target_date, slot);
         }
-        // 자동 지근(지근 번호·연휴 치환 '지정(야)')도 지근 칸에 넣되 * 로 구분 표시.
-        // '지정(야)'는 regularTurn 에 치환 전 원래 근무번호가 들어있다: 이름(58/야).
+        // 자동 지근(지근 번호·연휴 치환 '지(야)')도 지근 칸에 넣되 * 로 구분 표시.
+        // '지(야)'는 regularTurn 에 치환 전 원래 근무번호가 들어있다: 이름(58/야).
         if (r.record_type === "지휴") slot.지휴.push(formatEntry(r));
         else if (r.record_type === DESIGNATED_NIGHT_TURN)
           slot.지근.push(

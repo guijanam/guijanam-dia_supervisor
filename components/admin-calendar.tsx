@@ -629,7 +629,7 @@ export function AdminCalendar() {
                 key={date}
                 onClick={() => setSelectedDate(date)}
                 className={cn(
-                  "min-h-[64px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col gap-0.5",
+                  "min-h-[48px] rounded-md border p-1 text-left transition-colors hover:bg-accent flex flex-col gap-0.5",
                   !inMonth && "opacity-35",
                   isOver &&
                     "ring-2 ring-amber-500 bg-amber-50 dark:bg-amber-950/40"
@@ -637,7 +637,7 @@ export function AdminCalendar() {
               >
                 <span
                   className={cn(
-                    "text-xs font-semibold",
+                    "text-[10px] font-semibold leading-none -ml-0.5 -mt-0.5",
                     getDayColorClass(date, holidays)
                   )}
                 >
@@ -648,7 +648,7 @@ export function AdminCalendar() {
                     key={e.id}
                     title={`${e.staff_name} (${e.staff_position}) ${e.record_type}`}
                     className={cn(
-                      "text-[10px] font-bold rounded px-1 truncate",
+                      "text-[9px] font-bold rounded px-1 truncate",
                       e.record_type === "지휴"
                         ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
                         : e.staff_position === "차장"
