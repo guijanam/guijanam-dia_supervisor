@@ -596,14 +596,19 @@ export function AdminCalendar() {
         const cells = allDates.map((date) => {
           const key = `${emp.staff_id}|${date}`;
           const rawTurn = regularByStaff.get(key);
+          // 휴가 포함 근무 / 운휴 여부 — 화면(getTurnColorClass)과 동일한 판정.
+          // 지근 번호(예: 휴(지))는 화면에서 하늘색이므로 휴무에서 제외한다.
+          let isHue = false;
+          let isWeekendTurn = false;
           if (rawTurn) {
-            if (rawTurn.includes("휴") && !jigeunNumberTurns.includes(rawTurn))
-              hueCount++;
+            isHue =
+              rawTurn.includes("휴") && !jigeunNumberTurns.includes(rawTurn);
+            if (isHue) hueCount++;
             const dayName = getDayName(date);
             const isHoliday =
               dayName === "토" || dayName === "일" || holidaySet.has(date);
-            if (isHoliday && weekendHolidayTurns.includes(rawTurn))
-              weekendTurnCount++;
+            isWeekendTurn = isHoliday && weekendHolidayTurns.includes(rawTurn);
+            if (isWeekendTurn) weekendTurnCount++;
           }
 
           const special = specialByStaff.get(key);
@@ -611,18 +616,32 @@ export function AdminCalendar() {
           else if (special === "지휴") jihyuCount++;
 
           const turn = displayByStaff.get(key) ?? "";
-          if (!special) return turn;
-          return turn ? `${turn}(${special})` : special;
+          const text = !special
+            ? turn
+            : turn
+              ? `${turn}(${special})`
+              : special;
+          return { text, isRest: isHue || isWeekendTurn };
         });
 
         const row = ws.addRow([
           emp.employee_number ?? "",
           emp.staff_name,
           hueCount + weekendTurnCount + jihyuCount - jigeunCount,
-          ...cells,
+          ...cells.map((c) => c.text),
         ]);
         row.alignment = { horizontal: "center" };
         row.getCell(2).alignment = { horizontal: "left" };
+        // 휴가 포함 근무·운휴는 빨간 바탕 (화면의 bg-red-100 에 대응).
+        cells.forEach((c, i) => {
+          if (c.isRest) {
+            row.getCell(i + 4).fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFFEE2E2" },
+            };
+          }
+        });
       }
 
       ws.views = [{ state: "frozen", xSplit: 3, ySplit: 1 }];
