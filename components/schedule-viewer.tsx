@@ -6,10 +6,11 @@ import type {
   ScheduleRecord,
   PositionTab,
   HolidayTurnRule,
+  JigeunTurnSettings,
 } from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   parseHolidayTurnRulesText,
@@ -38,8 +39,8 @@ export function ScheduleViewer() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
-  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
-    DEFAULT_JIGEUN_NUMBER_TURNS
+  const [jigeunTurns, setJigeunTurns] = useState<JigeunTurnSettings>(
+    DEFAULT_JIGEUN_TURNS
   );
   const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
     DEFAULT_HOLIDAY_TURN_RULES
@@ -69,7 +70,7 @@ export function ScheduleViewer() {
           .lte("locdate", end),
         supabase
           .from("app_settings")
-          .select("weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules")
+          .select("weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
           .eq("id", 1)
           .maybeSingle(),
       ]);
@@ -83,14 +84,20 @@ export function ScheduleViewer() {
 
       const settings = settingsResult.data as {
         weekend_holiday_turns: string | null;
-        jigeun_number_turns: string | null;
+        jigeun_day_turns: string | null;
+        jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
       } | null;
       setWeekendHolidayTurns(
         settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
-      setJigeunNumberTurns(
-        settings ? parseTurnsText(settings.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
+      setJigeunTurns(
+        settings
+          ? {
+              dayTurns: parseTurnsText(settings.jigeun_day_turns),
+              nightTurns: parseTurnsText(settings.jigeun_night_turns),
+            }
+          : DEFAULT_JIGEUN_TURNS
       );
       setHolidayTurnRules(
         settings
@@ -202,7 +209,7 @@ export function ScheduleViewer() {
           emptyMessage={emptyMessage}
           holidays={holidays}
           weekendHolidayTurns={weekendHolidayTurns}
-          jigeunNumberTurns={jigeunNumberTurns}
+          jigeunTurns={jigeunTurns}
         />
       </div>
       <BottomTabs selectedTab={selectedTab} onTabChange={setSelectedTab} />

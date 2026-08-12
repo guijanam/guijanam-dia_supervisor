@@ -11,7 +11,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { getDayName, getDayColorClass, getTurnColorClass } from "@/lib/schedule-utils";
-import { DEFAULT_WEEKEND_HOLIDAY_TURNS, DEFAULT_JIGEUN_NUMBER_TURNS } from "@/lib/types";
+import type { JigeunTurnSettings } from "@/lib/types";
+import { DEFAULT_WEEKEND_HOLIDAY_TURNS, DEFAULT_JIGEUN_TURNS } from "@/lib/types";
 
 interface ScheduleTableProps {
   names: string[];
@@ -22,7 +23,8 @@ interface ScheduleTableProps {
   emptyMessage: string | null;
   holidays: Set<string>;
   weekendHolidayTurns?: string[];
-  jigeunNumberTurns?: string[];
+  // 배경색 판정에만 쓴다. 이 표는 한 줄짜리 셀이라 '지(주)'/'지(야)' 배지는 넣지 않는다.
+  jigeunTurns?: JigeunTurnSettings;
 }
 
 export function ScheduleTable({
@@ -34,7 +36,7 @@ export function ScheduleTable({
   emptyMessage,
   holidays,
   weekendHolidayTurns = DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  jigeunNumberTurns = DEFAULT_JIGEUN_NUMBER_TURNS,
+  jigeunTurns = DEFAULT_JIGEUN_TURNS,
 }: ScheduleTableProps) {
   if (isLoading) {
     return (
@@ -100,7 +102,7 @@ export function ScheduleTable({
                     key={date}
                     className={cn(
                       "text-center text-xs whitespace-nowrap px-2",
-                      getTurnColorClass(turn, date, holidays, weekendHolidayTurns, jigeunNumberTurns)
+                      getTurnColorClass(turn, date, holidays, weekendHolidayTurns, jigeunTurns)
                     )}
                   >
                     {turn}

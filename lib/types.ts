@@ -64,16 +64,16 @@ export const DEFAULT_JIGEUN_CAPS: JigeunCaps = {
   holiday: 4,
 };
 
-// 앱 설정 집합: 지근 정원 + 신청 마감일 + 운휴 번호 + 지근 번호 + 연휴 근무 치환.
+// 앱 설정 집합: 지근 정원 + 신청 마감일 + 운휴 번호 + 지정근무 번호 + 연휴 근무 치환.
 // requestFreezeDate 가 'YYYY-MM-DD' 이고 오늘이 그 이후이면 사용자 신청·삭제 차단.
 // weekendHolidayTurns 는 주말/공휴일에 운휴로 집계되는 근무번호 목록(승무소별 상이).
-// jigeunNumberTurns 는 요일/공휴일과 무관하게 지근으로 표시되는 근무번호 목록.
+// jigeunTurns 는 요일/공휴일과 무관하게 지근으로 표시되는 주간/야간 근무번호 목록.
 // holidayTurnRules 는 연속 이틀이 모두 휴일일 때 표시만 바꾸는 근무번호 짝 규칙.
 export interface AppSettings {
   caps: JigeunCaps;
   requestFreezeDate: string | null;
   weekendHolidayTurns: string[];
-  jigeunNumberTurns: string[];
+  jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
 }
 
@@ -87,7 +87,55 @@ export const DEFAULT_WEEKEND_HOLIDAY_TURNS: string[] = [
   "37",
 ];
 
-export const DEFAULT_JIGEUN_NUMBER_TURNS: string[] = [];
+// 지정근무(지근) 번호 설정. 요일/공휴일과 무관하게 지근으로 표시되며,
+// 주간은 '지(주)', 야간은 '지(야)' 배지로 구분한다. 배경색은 둘 다 하늘색.
+export type JigeunKind = "day" | "night";
+
+export interface JigeunTurnSettings {
+  dayTurns: string[];
+  nightTurns: string[];
+}
+
+export const DEFAULT_JIGEUN_TURNS: JigeunTurnSettings = {
+  dayTurns: [],
+  nightTurns: [],
+};
+
+// 근무번호가 지정근무인지, 주간인지 야간인지 판정. 아니면 null.
+// 주간/야간에 같은 번호가 중복 저장되면 주간이 이긴다
+// (정상 경로에서는 validateJigeunTurns 가 저장 시점에 차단한다).
+export function getJigeunKind(
+  turn: string,
+  s: JigeunTurnSettings
+): JigeunKind | null {
+  if (s.dayTurns.includes(turn)) return "day";
+  if (s.nightTurns.includes(turn)) return "night";
+  return null;
+}
+
+export function isJigeunTurn(turn: string, s: JigeunTurnSettings): boolean {
+  return getJigeunKind(turn, s) !== null;
+}
+
+// 화면·엑셀 공통 배지 텍스트.
+// 주의: 'night' 의 반환값은 requests-panel.tsx 의 DESIGNATED_NIGHT_TURN
+// ('지(야)') 과 의도적으로 같은 문자열이다 — 연휴 치환 경로와 지정근무 번호
+// 경로가 같은 라벨로 수렴해야 사용자에게 하나의 개념으로 보인다.
+export function getJigeunBadgeLabel(kind: JigeunKind): string {
+  return kind === "day" ? "지(주)" : "지(야)";
+}
+
+// 같은 근무번호가 주간·야간에 동시에 들어가면 판정이 모호해지므로 저장 시 차단.
+export function validateJigeunTurns(
+  dayTurns: string[],
+  nightTurns: string[]
+): string | null {
+  const dup = dayTurns.filter((t) => nightTurns.includes(t));
+  if (dup.length > 0) {
+    return `주간과 야간에 중복된 근무번호가 있습니다: ${dup.join(", ")}`;
+  }
+  return null;
+}
 
 // 연휴(토/일/공휴일) 이틀 연속일 때만 치환되는 근무번호 짝.
 // 예: ('58','58~') 가 연속 이틀 모두 휴일이면 그 이틀을 ('휴73','휴74') 로 표시.

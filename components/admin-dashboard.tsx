@@ -2,11 +2,15 @@
 
 import { useState, useRef, type ComponentType } from "react";
 import { useAuth } from "@/lib/auth-context";
-import type { JigeunCaps, HolidayTurnRule } from "@/lib/types";
+import type {
+  JigeunCaps,
+  HolidayTurnRule,
+  JigeunTurnSettings,
+} from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -85,8 +89,8 @@ export function AdminDashboard() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
-  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
-    DEFAULT_JIGEUN_NUMBER_TURNS
+  const [jigeunTurns, setJigeunTurns] = useState<JigeunTurnSettings>(
+    DEFAULT_JIGEUN_TURNS
   );
   const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
     DEFAULT_HOLIDAY_TURN_RULES
@@ -126,7 +130,7 @@ export function AdminDashboard() {
             caps={caps}
             freezeDate={freezeDate}
             weekendHolidayTurns={weekendHolidayTurns}
-            jigeunNumberTurns={jigeunNumberTurns}
+            jigeunTurns={jigeunTurns}
             holidayTurnRules={holidayTurnRules}
             onSaved={() => requestsRefreshRef.current()}
           />
@@ -197,7 +201,7 @@ export function AdminDashboard() {
                 setCaps(s.caps);
                 setFreezeDate(s.freezeDate);
                 setWeekendHolidayTurns(s.weekendHolidayTurns);
-                setJigeunNumberTurns(s.jigeunNumberTurns);
+                setJigeunTurns(s.jigeunTurns);
                 setHolidayTurnRules(s.holidayTurnRules);
               }}
               registerRefresh={(fn) => {
