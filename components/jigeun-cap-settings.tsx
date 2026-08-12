@@ -297,18 +297,21 @@ export function JigeunCapSettings({
               <Input
                 type="text"
                 className="h-9"
-                placeholder="예: 58,58~:휴73,휴74"
+                placeholder="예: 58,58~:휴73,휴74;61,61~,휴14:휴79,지(야),지(야)~"
                 value={draftHolidayRulesText}
                 disabled={isSaving}
                 onChange={(e) => setDraftHolidayRulesText(e.target.value)}
               />
             </div>
             <p className="text-xs text-muted-foreground pl-[4.75rem]">
-              연속된 이틀이 <b>모두</b> 토/일/공휴일일 때만 표시가 바뀝니다.
-              형식은 <code>원래A,원래B:표시A,표시B</code> 이며 여러 짝은{" "}
-              <code>;</code> 로 구분합니다. 한쪽만 휴일이면 치환되지 않고, 달이
-              바뀌는 지점에 걸친 짝도 치환되지 않습니다. 표시만 바뀔 뿐
-              휴무/운휴/총휴 집계는 원래 근무번호 기준 그대로입니다.
+              연속된 <b>앞 이틀</b>이 모두 토/일/공휴일일 때만 표시가 바뀝니다.
+              형식은 <code>원래들:표시들</code> 이며 양쪽 개수가 같아야 합니다
+              (2개 이상). 여러 짝은 <code>;</code> 로 구분합니다. 3개 이상으로
+              적으면 셋째 날부터는 휴일 여부와 무관하게 함께 치환됩니다 — 연휴
+              다음 근무일까지 이어지는 근무에 쓰세요. 예:{" "}
+              <code>61,61~,휴14:휴79,지(야),지(야)~</code>. 앞 이틀 중 한쪽만
+              휴일이면 치환되지 않습니다. 표시만 바뀔 뿐 휴무/운휴/총휴 집계는
+              원래 근무번호 기준 그대로입니다.
             </p>
           </div>
 
