@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type {
@@ -23,6 +24,7 @@ import {
   getCalendarGrid,
   isSameMonth,
   getDayColorClass,
+  getDayExcelColor,
   getDayName,
   getPositionCap,
   applyHolidayTurnRulesByStaffKey,
@@ -38,6 +40,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Download,
   Trash2,
   X,
 } from "lucide-react";
@@ -106,6 +109,7 @@ export function AdminCalendar() {
   const [addType, setAddType] = useState<RecordType>("지근");
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
 
   // 직원 검색 → 개인 뷰 전환 상태
   const [staffSearch, setStaffSearch] = useState("");
@@ -298,9 +302,11 @@ export function AdminCalendar() {
     setEmpLoading(true);
     (async () => {
       try {
+        // 기관사/차장 직책만 등록·검색 대상 (관리자·vip 등 제외)
         const { data, error: eErr } = await supabase
           .from("coworker_list")
           .select("staff_id, staff_name, staff_position")
+          .in("staff_position", [...POSITIONS])
           .order("staff_name", { ascending: true });
         if (eErr) throw eErr;
         setEmpList(
@@ -473,6 +479,168 @@ export function AdminCalendar() {
     }
   };
 
+  // 월간 근무표 엑셀: 직책별 시트, 행=직원, 열=해당 월 날짜.
+  // 각 칸은 정규 교번에 지근/지휴를 병기한다(예: 58(지휴)).
+  const exportExcel = async () => {
+    const [year, month] = monthValue.split("-").map(Number);
+    const monthStart = startOfMonth(new Date(year, month - 1));
+    const monthEnd = endOfMonth(monthStart);
+    const start = format(monthStart, "yyyy-MM-dd");
+    const end = format(monthEnd, "yyyy-MM-dd");
+
+    const [scheduleResult, specialResult, holidayResult, empResult] =
+      await Promise.all([
+        supabase
+          .rpc("get_schedule_by_range", {
+            p_start_date: start,
+            p_end_date: end,
+          })
+          .range(0, 100000),
+        supabase
+          .from("special_schedules")
+          .select("staff_id, target_date, record_type")
+          .gte("target_date", start)
+          .lte("target_date", end),
+        supabase
+          .from("holidays")
+          .select("locdate")
+          .eq("is_holiday", "Y")
+          .gte("locdate", start)
+          .lte("locdate", end),
+        supabase
+          .from("coworker_list")
+          .select("staff_id, staff_name, staff_position, employee_number")
+          .in("staff_position", [...POSITIONS])
+          .order("staff_name", { ascending: true }),
+      ]);
+
+    if (scheduleResult.error) throw scheduleResult.error;
+    if (specialResult.error) throw specialResult.error;
+    if (empResult.error) throw empResult.error;
+
+    const holidaySet = new Set<string>(
+      (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
+    );
+
+    const allDates: string[] = [];
+    for (
+      let d = monthStart;
+      d <= monthEnd;
+      d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+    ) {
+      allDates.push(format(d, "yyyy-MM-dd"));
+    }
+
+    // (staff_id|날짜) → 원래 교번. 통계는 이 원본을 쓰고, 표시는 치환본을 쓴다.
+    const regularByStaff = new Map<string, string>();
+    for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+      const dateStr = row.date ? format(new Date(row.date), "yyyy-MM-dd") : "";
+      if (dateStr) regularByStaff.set(`${row.staff_id}|${dateStr}`, row.turn);
+    }
+    const displayByStaff = applyHolidayTurnRulesByStaffKey(
+      regularByStaff,
+      holidaySet,
+      holidayTurnRules
+    );
+
+    const specialByStaff = new Map<string, RecordType>();
+    for (const row of (specialResult.data ?? []) as Array<{
+      staff_id: number;
+      target_date: string;
+      record_type: RecordType;
+    }>) {
+      specialByStaff.set(`${row.staff_id}|${row.target_date}`, row.record_type);
+    }
+
+    const employees = (empResult.data ?? []) as Array<{
+      staff_id: number;
+      staff_name: string;
+      staff_position: string;
+      employee_number: string | null;
+    }>;
+
+    const wb = new ExcelJS.Workbook();
+
+    for (const pos of POSITIONS) {
+      const ws = wb.addWorksheet(pos);
+      ws.columns = [
+        { width: 12 },
+        { width: 12 },
+        { width: 11 },
+        ...allDates.map(() => ({ width: 9 })),
+      ];
+
+      const headerRow = ws.addRow([
+        "사번",
+        "이름",
+        "총휴무갯수",
+        ...allDates.map((d) => `${Number(d.slice(8, 10))}일(${getDayName(d)})`),
+      ]);
+      headerRow.font = { bold: true };
+      headerRow.alignment = { horizontal: "center" };
+      // 화면(getDayColorClass)과 동일한 규칙: 공휴일·일요일 빨강, 토요일 파랑.
+      allDates.forEach((date, i) => {
+        const color = getDayExcelColor(date, holidaySet);
+        if (color)
+          headerRow.getCell(i + 4).font = { bold: true, color: { argb: color } };
+      });
+
+      for (const emp of employees.filter((e) => e.staff_position === pos)) {
+        // 총휴무 = 휴무 + 운휴 + 지휴 − 지근 (user-calendar 의 '총휴'와 동일 공식).
+        // 집계는 연휴 치환 전 원본 교번 기준.
+        let hueCount = 0;
+        let weekendTurnCount = 0;
+        let jigeunCount = 0;
+        let jihyuCount = 0;
+
+        const cells = allDates.map((date) => {
+          const key = `${emp.staff_id}|${date}`;
+          const rawTurn = regularByStaff.get(key);
+          if (rawTurn) {
+            if (rawTurn.includes("휴") && !jigeunNumberTurns.includes(rawTurn))
+              hueCount++;
+            const dayName = getDayName(date);
+            const isHoliday =
+              dayName === "토" || dayName === "일" || holidaySet.has(date);
+            if (isHoliday && weekendHolidayTurns.includes(rawTurn))
+              weekendTurnCount++;
+          }
+
+          const special = specialByStaff.get(key);
+          if (special === "지근") jigeunCount++;
+          else if (special === "지휴") jihyuCount++;
+
+          const turn = displayByStaff.get(key) ?? "";
+          if (!special) return turn;
+          return turn ? `${turn}(${special})` : special;
+        });
+
+        const row = ws.addRow([
+          emp.employee_number ?? "",
+          emp.staff_name,
+          hueCount + weekendTurnCount + jihyuCount - jigeunCount,
+          ...cells,
+        ]);
+        row.alignment = { horizontal: "center" };
+        row.getCell(2).alignment = { horizontal: "left" };
+      }
+
+      ws.views = [{ state: "frozen", xSplit: 3, ySplit: 1 }];
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(
+      new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `월간근무표_${monthValue}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const selectedEntries = selectedDate
     ? specialMap.get(selectedDate) ?? []
     : [];
@@ -506,6 +674,28 @@ export function AdminCalendar() {
         <span className="font-bold text-lg tabular-nums">{monthValue}</span>
         <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(1)}>
           <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={exportBusy}
+          title="월간 근무표 엑셀 다운로드"
+          onClick={() => {
+            setExportBusy(true);
+            setError(null);
+            exportExcel()
+              .catch((err) =>
+                setError(err instanceof Error ? err.message : "엑셀 생성 실패")
+              )
+              .finally(() => setExportBusy(false));
+          }}
+        >
+          {exportBusy ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+          Excel
         </Button>
       </div>
 
@@ -545,12 +735,7 @@ export function AdminCalendar() {
               (() => {
                 const q = staffSearch.trim().toLowerCase();
                 const matches = empList
-                  .filter(
-                    (e) =>
-                      (e.staff_position === "기관사" ||
-                        e.staff_position === "차장") &&
-                      e.staff_name.toLowerCase().includes(q)
-                  )
+                  .filter((e) => e.staff_name.toLowerCase().includes(q))
                   .slice(0, 12);
                 if (matches.length === 0) {
                   return (
