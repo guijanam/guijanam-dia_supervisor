@@ -8,13 +8,17 @@ import type {
   ScheduleRecord,
   SpecialSchedule,
   HolidayTurnRule,
+  JigeunTurnSettings,
 } from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   parseHolidayTurnRulesText,
+  isJigeunTurn,
+  getJigeunKind,
+  getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
   getTodayMonthStr,
@@ -67,8 +71,8 @@ export function UserCalendar() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
-  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
-    DEFAULT_JIGEUN_NUMBER_TURNS
+  const [jigeunTurns, setJigeunTurns] = useState<JigeunTurnSettings>(
+    DEFAULT_JIGEUN_TURNS
   );
   const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
     DEFAULT_HOLIDAY_TURN_RULES
@@ -90,7 +94,7 @@ export function UserCalendar() {
     let weekendTurnCount = 0;
     for (const [date, turn] of regularMap) {
       if (!isSameMonth(date, monthValue)) continue;
-      if (turn.includes("휴") && !jigeunNumberTurns.includes(turn)) hueCount++;
+      if (turn.includes("휴") && !isJigeunTurn(turn, jigeunTurns)) hueCount++;
       const dayName = getDayName(date);
       const isHoliday =
         dayName === "토" || dayName === "일" || holidays.has(date);
@@ -107,7 +111,7 @@ export function UserCalendar() {
 
     const totalRest = hueCount + weekendTurnCount + jihyuCount - jigeunCount;
     return { hueCount, weekendTurnCount, jigeunCount, jihyuCount, totalRest };
-  }, [regularMap, specialMap, holidays, monthValue, weekendHolidayTurns, jigeunNumberTurns]);
+  }, [regularMap, specialMap, holidays, monthValue, weekendHolidayTurns, jigeunTurns]);
 
   // 화면 표시용 근무 맵(연휴 짝 치환 적용).
   // 위 monthStats 는 원본 regularMap 을 그대로 쓴다 — 집계는 원래 근무번호 기준.
@@ -148,7 +152,7 @@ export function UserCalendar() {
             .lte("locdate", end),
           supabase
             .from("app_settings")
-            .select("request_freeze_date, weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules")
+            .select("request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -159,15 +163,21 @@ export function UserCalendar() {
       const settings = settingsResult.data as {
         request_freeze_date: string | null;
         weekend_holiday_turns: string | null;
-        jigeun_number_turns: string | null;
+        jigeun_day_turns: string | null;
+        jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
       } | null;
       setRequestFreezeDate(settings?.request_freeze_date ?? null);
       setWeekendHolidayTurns(
         settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
-      setJigeunNumberTurns(
-        settings ? parseTurnsText(settings.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
+      setJigeunTurns(
+        settings
+          ? {
+              dayTurns: parseTurnsText(settings.jigeun_day_turns),
+              nightTurns: parseTurnsText(settings.jigeun_night_turns),
+            }
+          : DEFAULT_JIGEUN_TURNS
       );
       const holidayRules = settings
         ? parseHolidayTurnRulesText(settings.holiday_turn_rules)
@@ -384,9 +394,11 @@ export function UserCalendar() {
                   date,
                   holidays,
                   weekendHolidayTurns,
-                  jigeunNumberTurns
+                  jigeunTurns
                 )
               : "";
+            // 배경색과 같은 값(연휴 치환 후 turn)으로 판정해야 색과 배지가 어긋나지 않는다.
+            const jigeunKind = turn ? getJigeunKind(turn, jigeunTurns) : null;
             return (
               <button
                 key={date}
@@ -411,6 +423,11 @@ export function UserCalendar() {
                 {turn && (
                   <span className="text-sm font-semibold truncate text-center text-foreground">
                     {turn}
+                  </span>
+                )}
+                {jigeunKind && (
+                  <span className="text-[9px] font-bold leading-none text-center text-sky-700 dark:text-sky-300">
+                    {getJigeunBadgeLabel(jigeunKind)}
                   </span>
                 )}
                 <div className="mt-auto flex flex-col gap-0.5">

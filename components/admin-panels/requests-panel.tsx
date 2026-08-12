@@ -9,14 +9,18 @@ import type {
   SpecialScheduleWithEmployee,
   JigeunCaps,
   HolidayTurnRule,
+  JigeunTurnSettings,
+  JigeunKind,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   parseHolidayTurnRulesText,
+  getJigeunKind,
+  getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
   getTodayMonthStr,
@@ -60,8 +64,10 @@ interface Row extends SpecialScheduleWithEmployee {
   regularTurn: string | null;
 }
 
-// 지근 번호(turn)로 지정되어 special_schedules 신청 없이 자동으로 지근 처리되는 근무.
+// 지정근무 번호(turn)로 지정되어 special_schedules 신청 없이 자동으로 지근 처리되는 근무.
 // exportExcel 에서 기존 신청 건과 같은 행 포맷으로 합쳐 내보내기 위한 용도.
+// kind 는 주간/야간 구분 — 엑셀에 '이름(41/주)*' / '이름(58/야)*' 로 찍는다.
+// 연휴 치환 '지(야)' 경로(designatedNightRows)는 kind 없이 항상 야간으로 취급한다.
 interface JigeunNumberRow {
   staff_id: number;
   staff_name: string;
@@ -69,6 +75,7 @@ interface JigeunNumberRow {
   employee_number: string | null;
   target_date: string;
   regularTurn: string;
+  kind?: JigeunKind;
 }
 
 // 연휴 짝 치환(holiday_turn_rules) 결과가 '지(야)' 인 근무.
@@ -83,7 +90,7 @@ export interface SettingsSnapshot {
   caps: JigeunCaps;
   freezeDate: string | null;
   weekendHolidayTurns: string[];
-  jigeunNumberTurns: string[];
+  jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
 }
 
@@ -114,8 +121,8 @@ export function RequestsPanel({
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
-  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
-    DEFAULT_JIGEUN_NUMBER_TURNS
+  const [jigeunTurns, setJigeunTurns] = useState<JigeunTurnSettings>(
+    DEFAULT_JIGEUN_TURNS
   );
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
 
@@ -167,7 +174,7 @@ export function RequestsPanel({
           .range(0, 10000),
         supabase
           .from("app_settings")
-          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules")
+          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
           .eq("id", 1)
           .maybeSingle(),
         supabase
@@ -188,7 +195,8 @@ export function RequestsPanel({
         jigeun_cap_holiday: number;
         request_freeze_date: string | null;
         weekend_holiday_turns: string | null;
-        jigeun_number_turns: string | null;
+        jigeun_day_turns: string | null;
+        jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
       } | null;
       const caps = s
@@ -203,19 +211,23 @@ export function RequestsPanel({
       const turns = s
         ? parseTurnsText(s.weekend_holiday_turns)
         : DEFAULT_WEEKEND_HOLIDAY_TURNS;
-      const jigeunTurns = s
-        ? parseTurnsText(s.jigeun_number_turns)
-        : DEFAULT_JIGEUN_NUMBER_TURNS;
+      // state 반영 전에 아래 자동 지근 판정에서 바로 써야 하므로 로컬 변수로 먼저 만든다.
+      const loadedJigeunTurns: JigeunTurnSettings = s
+        ? {
+            dayTurns: parseTurnsText(s.jigeun_day_turns),
+            nightTurns: parseTurnsText(s.jigeun_night_turns),
+          }
+        : DEFAULT_JIGEUN_TURNS;
       const holidayRules = s
         ? parseHolidayTurnRulesText(s.holiday_turn_rules)
         : DEFAULT_HOLIDAY_TURN_RULES;
       setWeekendHolidayTurns(turns);
-      setJigeunNumberTurns(jigeunTurns);
+      setJigeunTurns(loadedJigeunTurns);
       onSettingsLoadedRef.current?.({
         caps,
         freezeDate,
         weekendHolidayTurns: turns,
-        jigeunNumberTurns: jigeunTurns,
+        jigeunTurns: loadedJigeunTurns,
         holidayTurnRules: holidayRules,
       });
 
@@ -250,27 +262,31 @@ export function RequestsPanel({
         created_at?: string;
       }>;
 
-      // 지근 번호(turn)로 자동 지정된 (staff_id, 날짜) — special_schedules 신청과 중복 제외용
+      // 지정근무 번호(turn)로 자동 지정된 (staff_id, 날짜) — special_schedules 신청과 중복 제외용
       const jigeunNumberEntries: Array<{
         staff_id: number;
         target_date: string;
         turn: string;
+        kind: JigeunKind;
       }> = [];
       const requestedKeys = new Set(
         list.map((s) => `${s.staff_id}|${s.target_date}`)
       );
-      // 주의: 지근 번호 판정은 연휴 치환 전의 '원래' turn 으로 해야 한다.
+      // 주의: 지정근무 번호 판정은 연휴 치환 전의 '원래' turn 으로 해야 한다.
       // 치환된 코드(휴73 등)로 매칭하면 자동 지근 대상이 달라진다.
       for (const row of scheduleRows) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
-        if (!dateStr || !jigeunTurns.includes(row.turn)) continue;
+        if (!dateStr) continue;
+        const kind = getJigeunKind(row.turn, loadedJigeunTurns);
+        if (!kind) continue;
         if (requestedKeys.has(`${row.staff_id}|${dateStr}`)) continue;
         jigeunNumberEntries.push({
           staff_id: row.staff_id,
           target_date: dateStr,
           turn: row.turn,
+          kind,
         });
       }
 
@@ -344,6 +360,7 @@ export function RequestsPanel({
             // 표시용은 치환 후 값 (판정은 위에서 원본 turn 으로 이미 끝남)
             regularTurn:
               displayRegularMap.get(`${e.staff_id}|${e.target_date}`) ?? e.turn,
+            kind: e.kind,
           };
         })
       );
@@ -542,6 +559,8 @@ export function RequestsPanel({
       regularTurn: string | null;
       record_type: string;
       created_at?: string;
+      // 자동 지근 행의 주간/야간 구분. 신청 건(지근/지휴)에는 없다.
+      kind?: JigeunKind;
     };
 
     const combined: ExportEntry[] = [
@@ -561,6 +580,7 @@ export function RequestsPanel({
         target_date: r.target_date,
         regularTurn: r.regularTurn,
         record_type: "지근(번호)",
+        kind: r.kind,
       })),
       ...filteredDesignatedRows.map((r) => ({
         employee_number: r.employee_number,
@@ -569,6 +589,8 @@ export function RequestsPanel({
         target_date: r.target_date,
         regularTurn: r.regularTurn,
         record_type: DESIGNATED_NIGHT_TURN,
+        // 연휴 치환 '지(야)' 경로는 정의상 항상 야간이다.
+        kind: "night" as JigeunKind,
       })),
     ].filter((r) => !EXCLUDED_EXPORT_TURNS.includes(r.regularTurn ?? ""));
 
@@ -597,18 +619,21 @@ export function RequestsPanel({
           slot = { 지근: [], 지휴: [] };
           byDate.set(r.target_date, slot);
         }
-        // 자동 지근(지근 번호·연휴 치환 '지(야)')도 지근 칸에 넣되 * 로 구분 표시.
-        // '지(야)'는 regularTurn 에 치환 전 원래 근무번호가 들어있다: 이름(58/야).
+        // 자동 지근(지정근무 번호·연휴 치환 '지(야)')도 지근 칸에 넣되 * 로 구분 표시.
+        // 주/야 구분을 붙인다: 이름(41/주)* · 이름(58/야)*.
+        // 연휴 치환 건은 regularTurn 에 치환 전 원래 근무번호가 들어있다.
         if (r.record_type === "지휴") slot.지휴.push(formatEntry(r));
-        else if (r.record_type === DESIGNATED_NIGHT_TURN)
+        else if (
+          r.record_type === "지근(번호)" ||
+          r.record_type === DESIGNATED_NIGHT_TURN
+        ) {
+          const suffix = r.kind === "night" ? "야" : "주";
           slot.지근.push(
             r.regularTurn
-              ? `${r.staff_name}(${r.regularTurn}/야)*`
-              : `${r.staff_name}(야)*`
+              ? `${r.staff_name}(${r.regularTurn}/${suffix})*`
+              : `${r.staff_name}(${suffix})*`
           );
-        else if (r.record_type === "지근(번호)")
-          slot.지근.push(`${formatEntry(r)}*`);
-        else slot.지근.push(formatEntry(r));
+        } else slot.지근.push(formatEntry(r));
       }
 
       // 날짜를 열로: 1열은 구분 라벨, 2열부터 날짜가 오름차순으로 이어진다.
@@ -883,12 +908,23 @@ export function RequestsPanel({
                             row.target_date,
                             holidays,
                             weekendHolidayTurns,
-                            jigeunNumberTurns
+                            jigeunTurns
                           )
                         : ""
                     )}
                   >
                     {row.regularTurn ?? "-"}
+                    {(() => {
+                      // 한 줄짜리 셀이라 근무번호 옆에 붙인다.
+                      const kind = row.regularTurn
+                        ? getJigeunKind(row.regularTurn, jigeunTurns)
+                        : null;
+                      return kind ? (
+                        <span className="ml-1 text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                          {getJigeunBadgeLabel(kind)}
+                        </span>
+                      ) : null;
+                    })()}
                   </TableCell>
                   <TableCell className="text-center">
                     <select

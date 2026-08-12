@@ -10,14 +10,18 @@ import type {
   LotteryStatus,
   JigeunCaps,
   HolidayTurnRule,
+  JigeunTurnSettings,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   parseHolidayTurnRulesText,
+  isJigeunTurn,
+  getJigeunKind,
+  getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
   getTodayMonthStr,
@@ -91,8 +95,8 @@ export function AdminCalendar() {
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
-  const [jigeunNumberTurns, setJigeunNumberTurns] = useState<string[]>(
-    DEFAULT_JIGEUN_NUMBER_TURNS
+  const [jigeunTurns, setJigeunTurns] = useState<JigeunTurnSettings>(
+    DEFAULT_JIGEUN_TURNS
   );
   const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
     DEFAULT_HOLIDAY_TURN_RULES
@@ -168,7 +172,7 @@ export function AdminCalendar() {
           supabase
             .from("app_settings")
             .select(
-              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns, jigeun_number_turns, holiday_turn_rules"
+              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules"
             )
             .eq("id", 1)
             .maybeSingle(),
@@ -183,7 +187,8 @@ export function AdminCalendar() {
         jigeun_cap_sunday: number;
         jigeun_cap_holiday: number;
         weekend_holiday_turns: string | null;
-        jigeun_number_turns: string | null;
+        jigeun_day_turns: string | null;
+        jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
       } | null;
       setCaps(
@@ -199,8 +204,13 @@ export function AdminCalendar() {
       setWeekendHolidayTurns(
         s ? parseTurnsText(s.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
-      setJigeunNumberTurns(
-        s ? parseTurnsText(s.jigeun_number_turns) : DEFAULT_JIGEUN_NUMBER_TURNS
+      setJigeunTurns(
+        s
+          ? {
+              dayTurns: parseTurnsText(s.jigeun_day_turns),
+              nightTurns: parseTurnsText(s.jigeun_night_turns),
+            }
+          : DEFAULT_JIGEUN_TURNS
       );
       const holidayRules = s
         ? parseHolidayTurnRulesText(s.holiday_turn_rules)
@@ -597,12 +607,12 @@ export function AdminCalendar() {
           const key = `${emp.staff_id}|${date}`;
           const rawTurn = regularByStaff.get(key);
           // 휴가 포함 근무 / 운휴 여부 — 화면(getTurnColorClass)과 동일한 판정.
-          // 지근 번호(예: 휴(지))는 화면에서 하늘색이므로 휴무에서 제외한다.
+          // 지정근무 번호(예: 휴(지))는 화면에서 하늘색이므로 휴무에서 제외한다.
           let isHue = false;
           let isWeekendTurn = false;
           if (rawTurn) {
             isHue =
-              rawTurn.includes("휴") && !jigeunNumberTurns.includes(rawTurn);
+              rawTurn.includes("휴") && !isJigeunTurn(rawTurn, jigeunTurns);
             if (isHue) hueCount++;
             const dayName = getDayName(date);
             const isHoliday =
@@ -616,8 +626,13 @@ export function AdminCalendar() {
           else if (special === "지휴") jihyuCount++;
 
           const turn = displayByStaff.get(key) ?? "";
+          // 지정근무면 근무번호 뒤에 지(주)/지(야)를 덧붙인다. 신청(지근/지휴)이
+          // 있는 날은 기존처럼 그 신청 구분을 우선 표시한다.
+          const kind = turn ? getJigeunKind(turn, jigeunTurns) : null;
           const text = !special
-            ? turn
+            ? kind
+              ? `${turn} ${getJigeunBadgeLabel(kind)}`
+              : turn
             : turn
               ? `${turn}(${special})`
               : special;
@@ -1083,7 +1098,7 @@ export function AdminCalendar() {
         originDate={selectedDate}
         initialMonth={monthValue}
         weekendHolidayTurns={weekendHolidayTurns}
-        jigeunNumberTurns={jigeunNumberTurns}
+        jigeunTurns={jigeunTurns}
         holidayTurnRules={holidayTurnRules}
         onClose={() => setReschedTarget(null)}
         onMoved={() => {

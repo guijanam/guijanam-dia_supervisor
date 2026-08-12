@@ -7,8 +7,9 @@ import { useAuth } from "@/lib/auth-context";
 import type { RecordType, ScheduleRecord } from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_NUMBER_TURNS,
+  DEFAULT_JIGEUN_TURNS,
   parseTurnsText,
+  isJigeunTurn,
 } from "@/lib/types";
 import { getDayName } from "@/lib/schedule-utils";
 import { format } from "date-fns";
@@ -133,7 +134,7 @@ export function QuarterBalance() {
           .select("staff_id, staff_name, staff_position, employee_number"),
         supabase
           .from("app_settings")
-          .select("weekend_holiday_turns, jigeun_number_turns")
+          .select("weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns")
           .eq("id", 1)
           .maybeSingle(),
       ]);
@@ -149,14 +150,18 @@ export function QuarterBalance() {
 
       const settings = settingsResult.data as {
         weekend_holiday_turns: string | null;
-        jigeun_number_turns: string | null;
+        jigeun_day_turns: string | null;
+        jigeun_night_turns: string | null;
       } | null;
       const weekendHolidayTurns = settings
         ? parseTurnsText(settings.weekend_holiday_turns)
         : DEFAULT_WEEKEND_HOLIDAY_TURNS;
-      const jigeunNumberTurns = settings
-        ? parseTurnsText(settings.jigeun_number_turns)
-        : DEFAULT_JIGEUN_NUMBER_TURNS;
+      const jigeunTurns = settings
+        ? {
+            dayTurns: parseTurnsText(settings.jigeun_day_turns),
+            nightTurns: parseTurnsText(settings.jigeun_night_turns),
+          }
+        : DEFAULT_JIGEUN_TURNS;
 
       const holidays = new Set<string>(
         (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
@@ -203,7 +208,7 @@ export function QuarterBalance() {
           : "";
         if (!dateStr) continue;
         const r = ensure(row.staff_id);
-        if (row.turn.includes("휴") && !jigeunNumberTurns.includes(row.turn)) r.hueCount++;
+        if (row.turn.includes("휴") && !isJigeunTurn(row.turn, jigeunTurns)) r.hueCount++;
         const dayName = getDayName(dateStr);
         const isHoliday =
           dayName === "토" || dayName === "일" || holidays.has(dateStr);

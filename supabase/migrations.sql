@@ -421,3 +421,20 @@ create policy work_patterns_delete on public.work_patterns for delete using (tru
 -- 교번별 사용 직원 수 / 앵커 목록 조회용
 create index if not exists coworker_list_pattern_idx
   on public.coworker_list (pattern_id);
+
+-- ============================================================
+-- 18) 지근 번호를 주간/야간 지정근무로 분리 ---------------------
+--  - 섹션 15) 의 단일 목록(jigeun_number_turns)을 두 목록으로 나눈다.
+--    주간 목록의 근무는 달력·엑셀에 '지(주)', 야간 목록은 '지(야)' 배지로 표시.
+--    배경색은 주/야 모두 기존과 동일한 하늘색이며 구분은 배지 텍스트로만 한다.
+--  - 형식은 섹션 11/15 와 같은 쉼표 구분 텍스트(예: '41,42,43').
+--  - 같은 번호를 주간·야간에 동시에 넣으면 판정이 모호해지므로
+--    클라이언트(설정 저장 시)에서 차단한다. DB 제약은 걸지 않는다.
+--  - 기존 jigeun_number_turns 값은 이관하지 않는다. 두 컬럼 모두 빈 값으로
+--    시작하며 관리자가 설정 화면에서 주간/야간을 새로 입력해야 한다.
+--    → 재입력 전까지는 지근 표시가 나오지 않는다(의도된 동작).
+--  - jigeun_number_turns 컬럼은 롤백 여지를 위해 남겨두되 더 이상 읽지 않는다.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists jigeun_day_turns   text not null default '',
+  add column if not exists jigeun_night_turns text not null default '';

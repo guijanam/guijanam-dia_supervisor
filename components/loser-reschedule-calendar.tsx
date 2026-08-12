@@ -7,7 +7,9 @@ import type {
   LotteryStatus,
   ScheduleRecord,
   HolidayTurnRule,
+  JigeunTurnSettings,
 } from "@/lib/types";
+import { getJigeunKind, getJigeunBadgeLabel } from "@/lib/types";
 import {
   getCalendarGrid,
   isSameMonth,
@@ -52,7 +54,7 @@ interface Props {
   originDate: string | null;
   initialMonth: string;
   weekendHolidayTurns: string[];
-  jigeunNumberTurns: string[];
+  jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
   onClose: () => void;
   onMoved: () => void;
@@ -64,7 +66,7 @@ export function LoserRescheduleCalendar({
   originDate,
   initialMonth,
   weekendHolidayTurns,
-  jigeunNumberTurns,
+  jigeunTurns,
   holidayTurnRules,
   onClose,
   onMoved,
@@ -346,9 +348,11 @@ export function LoserRescheduleCalendar({
                     date,
                     holidays,
                     weekendHolidayTurns,
-                    jigeunNumberTurns
+                    jigeunTurns
                   )
                 : "";
+              // 배경색과 같은 turn 으로 판정해야 색과 배지가 어긋나지 않는다.
+              const jigeunKind = turn ? getJigeunKind(turn, jigeunTurns) : null;
               const isRest = turnBgClass.includes("bg-red");
               const disabled =
                 !inMonth || isOrigin || !!mine || busy || isLoading;
@@ -391,6 +395,11 @@ export function LoserRescheduleCalendar({
                   {turn && (
                     <span className="text-sm font-semibold truncate text-center text-foreground">
                       {turn}
+                    </span>
+                  )}
+                  {jigeunKind && (
+                    <span className="text-[9px] font-bold leading-none text-center text-sky-700 dark:text-sky-300">
+                      {getJigeunBadgeLabel(jigeunKind)}
                     </span>
                   )}
                   {mine && (

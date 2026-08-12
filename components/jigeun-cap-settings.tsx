@@ -3,17 +3,21 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
-import type { JigeunCaps, HolidayTurnRule } from "@/lib/types";
+import type {
+  JigeunCaps,
+  HolidayTurnRule,
+  JigeunTurnSettings,
+} from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_NUMBER_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   formatTurnsText,
   parseHolidayTurnRulesText,
   formatHolidayTurnRulesText,
   validateHolidayTurnRulesText,
+  validateJigeunTurns,
 } from "@/lib/types";
 import {
   Dialog,
@@ -37,7 +41,7 @@ interface Props {
   caps: JigeunCaps;
   freezeDate: string | null;
   weekendHolidayTurns: string[];
-  jigeunNumberTurns: string[];
+  jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
   onSaved: () => void;
 }
@@ -46,7 +50,7 @@ export function JigeunCapSettings({
   caps,
   freezeDate,
   weekendHolidayTurns,
-  jigeunNumberTurns,
+  jigeunTurns,
   holidayTurnRules,
   onSaved,
 }: Props) {
@@ -60,8 +64,11 @@ export function JigeunCapSettings({
   const [draftTurnsText, setDraftTurnsText] = useState<string>(
     formatTurnsText(weekendHolidayTurns)
   );
-  const [draftJigeunTurnsText, setDraftJigeunTurnsText] = useState<string>(
-    formatTurnsText(jigeunNumberTurns)
+  const [draftDayTurnsText, setDraftDayTurnsText] = useState<string>(
+    formatTurnsText(jigeunTurns.dayTurns)
+  );
+  const [draftNightTurnsText, setDraftNightTurnsText] = useState<string>(
+    formatTurnsText(jigeunTurns.nightTurns)
   );
   const [draftHolidayRulesText, setDraftHolidayRulesText] = useState<string>(
     formatHolidayTurnRulesText(holidayTurnRules)
@@ -75,7 +82,8 @@ export function JigeunCapSettings({
       setDraft(caps);
       setDraftFreezeDate(freezeDate ?? "");
       setDraftTurnsText(formatTurnsText(weekendHolidayTurns));
-      setDraftJigeunTurnsText(formatTurnsText(jigeunNumberTurns));
+      setDraftDayTurnsText(formatTurnsText(jigeunTurns.dayTurns));
+      setDraftNightTurnsText(formatTurnsText(jigeunTurns.nightTurns));
       setDraftHolidayRulesText(formatHolidayTurnRulesText(holidayTurnRules));
       setError(null);
     }
@@ -84,7 +92,7 @@ export function JigeunCapSettings({
     caps,
     freezeDate,
     weekendHolidayTurns,
-    jigeunNumberTurns,
+    jigeunTurns,
     holidayTurnRules,
   ]);
 
@@ -106,11 +114,22 @@ export function JigeunCapSettings({
       return;
     }
 
+    // 같은 번호가 주간·야간에 동시에 들어가면 지(주)/지(야) 판정이 모호해진다.
+    const normalizedDayTurns = parseTurnsText(draftDayTurnsText);
+    const normalizedNightTurns = parseTurnsText(draftNightTurnsText);
+    const jigeunError = validateJigeunTurns(
+      normalizedDayTurns,
+      normalizedNightTurns
+    );
+    if (jigeunError) {
+      setError(jigeunError);
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
       const normalizedTurns = parseTurnsText(draftTurnsText);
-      const normalizedJigeunTurns = parseTurnsText(draftJigeunTurnsText);
       const normalizedHolidayRules = parseHolidayTurnRulesText(
         draftHolidayRulesText
       );
@@ -123,7 +142,8 @@ export function JigeunCapSettings({
           jigeun_cap_holiday: draft.holiday,
           request_freeze_date: draftFreezeDate ? draftFreezeDate : null,
           weekend_holiday_turns: formatTurnsText(normalizedTurns),
-          jigeun_number_turns: formatTurnsText(normalizedJigeunTurns),
+          jigeun_day_turns: formatTurnsText(normalizedDayTurns),
+          jigeun_night_turns: formatTurnsText(normalizedNightTurns),
           holiday_turn_rules: formatHolidayTurnRulesText(
             normalizedHolidayRules
           ),
@@ -232,19 +252,42 @@ export function JigeunCapSettings({
 
           <div className="flex flex-col gap-1 pt-2 border-t">
             <div className="flex items-start gap-3">
-              <label className="w-16 text-sm font-medium pt-2">지근 번호</label>
+              <label className="w-24 text-sm font-medium pt-2 shrink-0">
+                주간 지정근무
+              </label>
               <Input
                 type="text"
                 className="h-9"
                 placeholder="예: 41,42,43"
-                value={draftJigeunTurnsText}
+                value={draftDayTurnsText}
                 disabled={isSaving}
-                onChange={(e) => setDraftJigeunTurnsText(e.target.value)}
+                onChange={(e) => setDraftDayTurnsText(e.target.value)}
               />
             </div>
-            <p className="text-xs text-muted-foreground pl-[4.75rem]">
-              요일/공휴일과 무관하게 지근으로 표시할 근무번호를 쉼표로
-              구분해 입력하세요. 비우면 지근 표시가 되지 않습니다.
+            <p className="text-xs text-muted-foreground pl-[6.75rem]">
+              주간 지정근무로 표시할 근무번호를 쉼표로 구분해 입력하세요.
+              달력·엑셀에 <b>지(주)</b> 로 표시됩니다.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1 pt-2 border-t">
+            <div className="flex items-start gap-3">
+              <label className="w-24 text-sm font-medium pt-2 shrink-0">
+                야간 지정근무
+              </label>
+              <Input
+                type="text"
+                className="h-9"
+                placeholder="예: 58,59"
+                value={draftNightTurnsText}
+                disabled={isSaving}
+                onChange={(e) => setDraftNightTurnsText(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground pl-[6.75rem]">
+              야간 지정근무로 표시할 근무번호를 쉼표로 구분해 입력하세요.
+              달력·엑셀에 <b>지(야)</b> 로 표시됩니다. 두 칸 모두 요일/공휴일과
+              무관하게 적용되며, 같은 번호를 주간·야간에 함께 넣을 수 없습니다.
             </p>
           </div>
 
@@ -275,7 +318,8 @@ export function JigeunCapSettings({
               onClick={() => {
                 setDraft(DEFAULT_JIGEUN_CAPS);
                 setDraftTurnsText(formatTurnsText(DEFAULT_WEEKEND_HOLIDAY_TURNS));
-                setDraftJigeunTurnsText(formatTurnsText(DEFAULT_JIGEUN_NUMBER_TURNS));
+                setDraftDayTurnsText("");
+                setDraftNightTurnsText("");
                 setDraftHolidayRulesText(
                   formatHolidayTurnRulesText(DEFAULT_HOLIDAY_TURN_RULES)
                 );
