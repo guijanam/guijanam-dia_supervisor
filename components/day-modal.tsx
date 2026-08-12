@@ -20,6 +20,8 @@ interface DayModalProps {
   employee: Employee;
   date: string | null;
   regularTurn: string | null;
+  // 운휴대기(연휴 짝 치환) 대치근무. 치환이 없으면 null.
+  substitutedTurn?: string | null;
   existing: SpecialSchedule | null;
   allEntries: DayEntry[];
   isFrozen: boolean;
@@ -32,6 +34,7 @@ export function DayModal({
   employee,
   date,
   regularTurn,
+  substitutedTurn,
   existing,
   allEntries,
   isFrozen,
@@ -98,6 +101,14 @@ export function DayModal({
           </DialogTitle>
           <DialogDescription>
             정규 근무: <span className="font-semibold">{regularTurn ?? "-"}</span>
+            {substitutedTurn && (
+              <>
+                {" → "}
+                <span className="font-semibold text-sky-700 dark:text-sky-300">
+                  {substitutedTurn}
+                </span>
+              </>
+            )}
             {existing && (
               <>
                 {" · "}현재 신청:{" "}

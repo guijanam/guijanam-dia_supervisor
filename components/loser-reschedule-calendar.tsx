@@ -17,6 +17,8 @@ import {
   getTurnColorClass,
   getDayName,
   applyHolidayTurnRules,
+  padDateRange,
+  getTurnDisplay,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -46,6 +48,8 @@ interface MyEntry {
   record_type: RecordType;
   lottery_status: LotteryStatus | null;
   regularTurn: string | null;
+  // 운휴대기(연휴 짝 치환) 대치근무. 치환이 없으면 null.
+  substitutedTurn: string | null;
 }
 
 interface Props {
@@ -72,7 +76,9 @@ export function LoserRescheduleCalendar({
   onMoved,
 }: Props) {
   const [monthValue, setMonthValue] = useState(initialMonth);
+  // regularMap = 치환 전 원본, displayMap = 운휴대기 치환 결과.
   const [regularMap, setRegularMap] = useState<Map<string, string>>(new Map());
+  const [displayMap, setDisplayMap] = useState<Map<string, string>>(new Map());
   const [mineMap, setMineMap] = useState<Map<string, MyEntry>>(new Map());
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
@@ -93,13 +99,15 @@ export function LoserRescheduleCalendar({
     const [year, month] = monthValue.split("-").map(Number);
     const start = format(startOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
+    // 월 경계에 걸친 연휴 짝을 판정하려면 앞뒤 하루가 더 필요하다.
+    const padded = padDateRange(start, end);
 
     try {
       const [scheduleResult, specialResult, holidayResult] = await Promise.all([
         supabase
           .rpc("get_schedule_by_range", {
-            p_start_date: start,
-            p_end_date: end,
+            p_start_date: padded.start,
+            p_end_date: padded.end,
           })
           .range(0, 10000),
         supabase
@@ -113,8 +121,8 @@ export function LoserRescheduleCalendar({
           .from("holidays")
           .select("locdate")
           .eq("is_holiday", "Y")
-          .gte("locdate", start)
-          .lte("locdate", end),
+          .gte("locdate", padded.start)
+          .lte("locdate", padded.end),
       ]);
 
       if (scheduleResult.error) throw scheduleResult.error;
@@ -124,17 +132,27 @@ export function LoserRescheduleCalendar({
         (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
       );
 
+      // 조회는 앞뒤 하루를 더 받지만, 월 밖의 날짜는 짝 판정용 context 로만 쓴다.
       const rMap = new Map<string, string>();
+      const rContext = new Map<string, string>();
       for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
         if (row.staff_id !== entry.staff_id) continue;
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
-        if (dateStr) rMap.set(dateStr, row.turn);
+        if (!dateStr) continue;
+        if (dateStr >= start && dateStr <= end) rMap.set(dateStr, row.turn);
+        else rContext.set(dateStr, row.turn);
       }
-      // 이 화면은 근무 표시 전용(집계 없음)이라 치환 결과를 그대로 상태에 담는다.
-      const displayMap = applyHolidayTurnRules(rMap, holidaySet, holidayTurnRules);
-      setRegularMap(displayMap);
+      // 운휴대기 칸은 원래근무/대치근무를 함께 보여줘야 하므로 원본도 같이 보관한다.
+      const displayMap = applyHolidayTurnRules(
+        rMap,
+        holidaySet,
+        holidayTurnRules,
+        rContext
+      );
+      setRegularMap(rMap);
+      setDisplayMap(displayMap);
 
       const mMap = new Map<string, MyEntry>();
       for (const row of (specialResult.data ?? []) as Array<{
@@ -148,7 +166,10 @@ export function LoserRescheduleCalendar({
           target_date: row.target_date,
           record_type: row.record_type,
           lottery_status: row.lottery_status,
-          regularTurn: displayMap.get(row.target_date) ?? null,
+          regularTurn: rMap.get(row.target_date) ?? null,
+          substitutedTurn:
+            getTurnDisplay(row.target_date, rMap, displayMap)?.substituted ??
+            null,
         });
       }
       setMineMap(mMap);
@@ -273,7 +294,9 @@ export function LoserRescheduleCalendar({
                         : "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/40 dark:text-red-200",
                       isOrigin && "ring-2 ring-amber-500"
                     )}
-                    title={`정규근무: ${m.regularTurn ?? "-"}`}
+                    title={`정규근무: ${m.regularTurn ?? "-"}${
+                      m.substitutedTurn ? ` → ${m.substitutedTurn}` : ""
+                    }`}
                   >
                     <span className="font-semibold tabular-nums">
                       {m.target_date.slice(5)}
@@ -339,7 +362,9 @@ export function LoserRescheduleCalendar({
             ))}
             {grid.map((date) => {
               const inMonth = isSameMonth(date, monthValue);
-              const turn = regularMap.get(date);
+              // 운휴대기 치환 칸은 원래근무(위)/대치근무(아래)를 함께 보여준다.
+              const display = getTurnDisplay(date, regularMap, displayMap);
+              const turn = displayMap.get(date) ?? regularMap.get(date);
               const mine = mineMap.get(date);
               const isOrigin = date === originDate;
               const turnBgClass = turn
@@ -348,7 +373,8 @@ export function LoserRescheduleCalendar({
                     date,
                     holidays,
                     weekendHolidayTurns,
-                    jigeunTurns
+                    jigeunTurns,
+                    display?.substituted != null
                   )
                 : "";
               // 배경색과 같은 turn 으로 판정해야 색과 배지가 어긋나지 않는다.
@@ -371,7 +397,13 @@ export function LoserRescheduleCalendar({
                         : mine
                           ? `이미 ${mine.record_type} 신청됨`
                           : `${date} (${getDayName(date)})${
-                              turn ? ` · ${turn}` : ""
+                              display
+                                ? ` · ${display.original}${
+                                    display.substituted
+                                      ? ` → ${display.substituted}`
+                                      : ""
+                                  }`
+                                : ""
                             }`
                   }
                   className={cn(
@@ -392,9 +424,14 @@ export function LoserRescheduleCalendar({
                   >
                     {Number(date.slice(8, 10))}
                   </span>
-                  {turn && (
+                  {display && (
                     <span className="text-sm font-semibold truncate text-center text-foreground">
-                      {turn}
+                      {display.original}
+                    </span>
+                  )}
+                  {display?.substituted && (
+                    <span className="text-[10px] font-bold leading-none text-center text-sky-700 dark:text-sky-300 truncate">
+                      {display.substituted}
                     </span>
                   )}
                   {jigeunKind && (

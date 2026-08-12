@@ -21,6 +21,7 @@ import {
   computeScheduleRange,
   computeInitialRange,
   buildScheduleMap,
+  padDateRange,
   applyHolidayTurnRules,
 } from "@/lib/schedule-utils";
 import { ScheduleControls } from "@/components/schedule-controls";
@@ -55,19 +56,21 @@ export function ScheduleViewer() {
     setError(null);
 
     try {
+      // 조회 범위 경계(월말 등)에 걸친 연휴 짝도 판정하려면 앞뒤 하루가 더 필요하다.
+      const padded = padDateRange(start, end);
       const [scheduleResult, holidayResult, settingsResult] = await Promise.all([
         supabase
           .rpc("get_schedule_by_range", {
-            p_start_date: start,
-            p_end_date: end,
+            p_start_date: padded.start,
+            p_end_date: padded.end,
           })
           .range(0, 10000),
         supabase
           .from("holidays")
           .select("locdate")
           .eq("is_holiday", "Y")
-          .gte("locdate", start)
-          .lte("locdate", end),
+          .gte("locdate", padded.start)
+          .lte("locdate", padded.end),
         supabase
           .from("app_settings")
           .select("weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
@@ -157,15 +160,37 @@ export function ScheduleViewer() {
   }, [monthValue, fetchSchedule]);
 
   // 표 표시용 — 직원별 근무 맵에 연휴 짝 치환을 적용한다.
-  const { names, scheduleMap } = useMemo(() => {
+  // 조회 범위 밖(앞뒤 하루)의 근무는 dateRange 에 없어 표에 그려지지 않지만,
+  // 경계에 걸친 짝을 판정할 수 있도록 context 로 넘긴다.
+  // originalMap 은 치환 전 원본 — 표에서 '원래근무/대치근무' 두 줄을 그리는 데 쓴다.
+  const { names, scheduleMap, originalMap } = useMemo(() => {
     const built = buildScheduleMap(allData, selectedTab, searchFilter);
-    if (holidayTurnRules.length === 0) return built;
-    const substituted = new Map<string, Map<string, string>>();
-    for (const [name, m] of built.scheduleMap) {
-      substituted.set(name, applyHolidayTurnRules(m, holidays, holidayTurnRules));
+    if (holidayTurnRules.length === 0) {
+      return { ...built, originalMap: built.scheduleMap };
     }
-    return { names: built.names, scheduleMap: substituted };
-  }, [allData, selectedTab, searchFilter, holidays, holidayTurnRules]);
+    const first = dateRange[0];
+    const last = dateRange[dateRange.length - 1];
+    const substituted = new Map<string, Map<string, string>>();
+    const originals = new Map<string, Map<string, string>>();
+    for (const [name, m] of built.scheduleMap) {
+      const inRange = new Map<string, string>();
+      const context = new Map<string, string>();
+      for (const [date, turn] of m) {
+        if (first && last && (date < first || date > last)) context.set(date, turn);
+        else inRange.set(date, turn);
+      }
+      originals.set(name, inRange);
+      substituted.set(
+        name,
+        applyHolidayTurnRules(inRange, holidays, holidayTurnRules, context)
+      );
+    }
+    return {
+      names: built.names,
+      scheduleMap: substituted,
+      originalMap: originals,
+    };
+  }, [allData, selectedTab, searchFilter, holidays, holidayTurnRules, dateRange]);
 
   const emptyMessage = useMemo(() => {
     if (isLoading || error) return null;
@@ -204,6 +229,7 @@ export function ScheduleViewer() {
           names={names}
           dateRange={dateRange}
           scheduleMap={scheduleMap}
+          originalMap={originalMap}
           isLoading={isLoading}
           error={error}
           emptyMessage={emptyMessage}

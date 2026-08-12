@@ -10,7 +10,12 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { getDayName, getDayColorClass, getTurnColorClass } from "@/lib/schedule-utils";
+import {
+  getDayName,
+  getDayColorClass,
+  getTurnColorClass,
+  getTurnDisplay,
+} from "@/lib/schedule-utils";
 import type { JigeunTurnSettings } from "@/lib/types";
 import { DEFAULT_WEEKEND_HOLIDAY_TURNS, DEFAULT_JIGEUN_TURNS } from "@/lib/types";
 
@@ -18,6 +23,9 @@ interface ScheduleTableProps {
   names: string[];
   dateRange: string[];
   scheduleMap: Map<string, Map<string, string>>;
+  // 치환 전 원본 근무 맵. 운휴대기 칸을 '원래근무/대치근무' 두 줄로 그리는 데 쓴다.
+  // 넘기지 않으면 scheduleMap 을 원본으로 취급 — 두 줄 표시가 생기지 않는다.
+  originalMap?: Map<string, Map<string, string>>;
   isLoading: boolean;
   error: string | null;
   emptyMessage: string | null;
@@ -31,6 +39,7 @@ export function ScheduleTable({
   names,
   dateRange,
   scheduleMap,
+  originalMap,
   isLoading,
   error,
   emptyMessage,
@@ -96,16 +105,39 @@ export function ScheduleTable({
                 {name}
               </TableCell>
               {dateRange.map((date) => {
-                const turn = scheduleMap.get(name)?.get(date) || "-";
+                const displayed = scheduleMap.get(name);
+                const original = originalMap?.get(name) ?? displayed;
+                // 운휴대기 치환 칸은 원래근무(위)/대치근무(아래)를 함께 보여준다.
+                const display =
+                  displayed && original
+                    ? getTurnDisplay(date, original, displayed)
+                    : null;
+                const turn = displayed?.get(date) || "-";
                 return (
                   <TableCell
                     key={date}
                     className={cn(
                       "text-center text-xs whitespace-nowrap px-2",
-                      getTurnColorClass(turn, date, holidays, weekendHolidayTurns, jigeunTurns)
+                      getTurnColorClass(
+                        turn,
+                        date,
+                        holidays,
+                        weekendHolidayTurns,
+                        jigeunTurns,
+                        display?.substituted != null
+                      )
                     )}
                   >
-                    {turn}
+                    {display?.substituted ? (
+                      <span className="flex flex-col leading-tight">
+                        <span>{display.original}</span>
+                        <span className="text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                          {display.substituted}
+                        </span>
+                      </span>
+                    ) : (
+                      turn
+                    )}
                   </TableCell>
                 );
               })}

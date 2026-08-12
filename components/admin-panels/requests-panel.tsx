@@ -28,6 +28,8 @@ import {
   getDayExcelColor,
   getTurnColorClass,
   applyHolidayTurnRulesByStaffKey,
+  padDateRange,
+  getTurnDisplay,
 } from "@/lib/schedule-utils";
 import { cn } from "@/lib/utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
@@ -61,7 +63,9 @@ import {
 interface Row extends SpecialScheduleWithEmployee {
   _draftDate: string;
   _draftType: RecordType;
+  // regularTurn 은 치환 전 원본, substitutedTurn 은 운휴대기 대치근무(없으면 null).
   regularTurn: string | null;
+  substitutedTurn: string | null;
 }
 
 // 지정근무 번호(turn)로 지정되어 special_schedules 신청 없이 자동으로 지근 처리되는 근무.
@@ -74,7 +78,9 @@ interface JigeunNumberRow {
   staff_position: string;
   employee_number: string | null;
   target_date: string;
+  // regularTurn 은 치환 전 원본, substitutedTurn 은 운휴대기 대치근무(없으면 null).
   regularTurn: string;
+  substitutedTurn: string | null;
   kind?: JigeunKind;
 }
 
@@ -152,6 +158,8 @@ export function RequestsPanel({
     const [year, month] = monthValue.split("-").map(Number);
     const start = format(startOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
+    // 월 경계에 걸친 연휴 짝을 판정하려면 앞뒤 하루가 더 필요하다.
+    const padded = padDateRange(start, end);
 
     try {
       const [
@@ -168,8 +176,8 @@ export function RequestsPanel({
           .order("target_date", { ascending: true }),
         supabase
           .rpc("get_schedule_by_range", {
-            p_start_date: start,
-            p_end_date: end,
+            p_start_date: padded.start,
+            p_end_date: padded.end,
           })
           .range(0, 10000),
         supabase
@@ -181,8 +189,8 @@ export function RequestsPanel({
           .from("holidays")
           .select("locdate")
           .eq("is_holiday", "Y")
-          .gte("locdate", start)
-          .lte("locdate", end),
+          .gte("locdate", padded.start)
+          .lte("locdate", padded.end),
       ]);
 
       if (qErr) throw qErr;
@@ -237,21 +245,34 @@ export function RequestsPanel({
       );
       setHolidays(holidaySet);
 
-      // (staff_id, 날짜) → 원래 근무(turn) 매핑
+      // (staff_id, 날짜) → 원래 근무(turn) 매핑.
+      // 조회는 앞뒤 하루를 더 받지만, 월 밖의 날짜는 짝 판정용 context 로만 쓰고
+      // regularMap 에는 넣지 않는다 — 아래 자동 지근 판정·행 생성이 이 맵을 그대로
+      // 순회하므로 월 밖 근무가 섞이면 없는 신청이 생긴다.
       const scheduleRows = (scheduleResult.data ?? []) as ScheduleRecord[];
       const regularMap = new Map<string, string>();
+      const contextMap = new Map<string, string>();
+      const inMonthRows: ScheduleRecord[] = [];
       for (const row of scheduleRows) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
-        if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
+        if (!dateStr) continue;
+        const key = `${row.staff_id}|${dateStr}`;
+        if (dateStr >= start && dateStr <= end) {
+          regularMap.set(key, row.turn);
+          inMonthRows.push(row);
+        } else {
+          contextMap.set(key, row.turn);
+        }
       }
       // 표시·엑셀용 치환 맵. 자동 지근 판정(아래)은 반드시 원본 turn 을 써야 하므로
       // regularMap 은 그대로 두고 별도 맵으로 분리한다.
       const displayRegularMap = applyHolidayTurnRulesByStaffKey(
         regularMap,
         holidaySet,
-        holidayRules
+        holidayRules,
+        contextMap
       );
 
       const list = (schedules ?? []) as Array<{
@@ -274,7 +295,7 @@ export function RequestsPanel({
       );
       // 주의: 지정근무 번호 판정은 연휴 치환 전의 '원래' turn 으로 해야 한다.
       // 치환된 코드(휴73 등)로 매칭하면 자동 지근 대상이 달라진다.
-      for (const row of scheduleRows) {
+      for (const row of inMonthRows) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
@@ -357,9 +378,14 @@ export function RequestsPanel({
             staff_position: emp?.staff_position ?? "",
             employee_number: emp?.employee_number ?? null,
             target_date: e.target_date,
-            // 표시용은 치환 후 값 (판정은 위에서 원본 turn 으로 이미 끝남)
-            regularTurn:
-              displayRegularMap.get(`${e.staff_id}|${e.target_date}`) ?? e.turn,
+            // regularTurn 은 항상 치환 전 원본. 대치근무는 substitutedTurn 으로 따로 준다.
+            regularTurn: e.turn,
+            substitutedTurn:
+              getTurnDisplay(
+                `${e.staff_id}|${e.target_date}`,
+                regularMap,
+                displayRegularMap
+              )?.substituted ?? null,
             kind: e.kind,
           };
         })
@@ -374,7 +400,14 @@ export function RequestsPanel({
             staff_position: emp?.staff_position ?? "",
             employee_number: emp?.employee_number ?? null,
             target_date: e.target_date,
+            // e.turn 은 이미 치환 전 원본(위 designatedEntries 참고).
             regularTurn: e.turn,
+            substitutedTurn:
+              getTurnDisplay(
+                `${e.staff_id}|${e.target_date}`,
+                regularMap,
+                displayRegularMap
+              )?.substituted ?? null,
           };
         })
       );
@@ -384,8 +417,13 @@ export function RequestsPanel({
         employee: empMap.get(s.staff_id) ?? null,
         _draftDate: s.target_date,
         _draftType: s.record_type,
-        regularTurn:
-          displayRegularMap.get(`${s.staff_id}|${s.target_date}`) ?? null,
+        regularTurn: regularMap.get(`${s.staff_id}|${s.target_date}`) ?? null,
+        substitutedTurn:
+          getTurnDisplay(
+            `${s.staff_id}|${s.target_date}`,
+            regularMap,
+            displayRegularMap
+          )?.substituted ?? null,
       }));
       setRows(mapped);
     } catch (err) {
@@ -556,7 +594,9 @@ export function RequestsPanel({
       staff_position: string;
       staff_name: string;
       target_date: string;
+      // regularTurn 은 치환 전 원본, substitutedTurn 은 운휴대기 대치근무(없으면 null).
       regularTurn: string | null;
+      substitutedTurn: string | null;
       record_type: string;
       created_at?: string;
       // 자동 지근 행의 주간/야간 구분. 신청 건(지근/지휴)에는 없다.
@@ -570,6 +610,7 @@ export function RequestsPanel({
         staff_name: r.employee?.staff_name ?? "",
         target_date: r.target_date,
         regularTurn: r.regularTurn,
+        substitutedTurn: r.substitutedTurn,
         record_type: r.record_type,
         created_at: r.created_at,
       })),
@@ -579,6 +620,7 @@ export function RequestsPanel({
         staff_name: r.staff_name,
         target_date: r.target_date,
         regularTurn: r.regularTurn,
+        substitutedTurn: r.substitutedTurn,
         record_type: "지근(번호)",
         kind: r.kind,
       })),
@@ -588,6 +630,7 @@ export function RequestsPanel({
         staff_name: r.staff_name,
         target_date: r.target_date,
         regularTurn: r.regularTurn,
+        substitutedTurn: r.substitutedTurn,
         record_type: DESIGNATED_NIGHT_TURN,
         // 연휴 치환 '지(야)' 경로는 정의상 항상 야간이다.
         kind: "night" as JigeunKind,
@@ -607,8 +650,11 @@ export function RequestsPanel({
     }
 
     // 한 셀에 들어갈 신청자 표기: 이름(근무번호). 근무번호가 없으면 이름만.
+    // 운휴대기 치환 건은 원래근무→대치근무를 함께 적는다: 이름(58→휴73).
+    const formatTurn = (r: ExportEntry) =>
+      r.substitutedTurn ? `${r.regularTurn}→${r.substitutedTurn}` : r.regularTurn;
     const formatEntry = (r: ExportEntry) =>
-      r.regularTurn ? `${r.staff_name}(${r.regularTurn})` : r.staff_name;
+      r.regularTurn ? `${r.staff_name}(${formatTurn(r)})` : r.staff_name;
 
     for (const pos of ["기관사", "차장"] as const) {
       const byDate = new Map<string, { 지근: string[]; 지휴: string[] }>();
@@ -630,7 +676,7 @@ export function RequestsPanel({
           const suffix = r.kind === "night" ? "야" : "주";
           slot.지근.push(
             r.regularTurn
-              ? `${r.staff_name}(${r.regularTurn}/${suffix})*`
+              ? `${r.staff_name}(${formatTurn(r)}/${suffix})*`
               : `${r.staff_name}(${suffix})*`
           );
         } else slot.지근.push(formatEntry(r));
@@ -904,21 +950,31 @@ export function RequestsPanel({
                       "text-center text-sm whitespace-nowrap",
                       row.regularTurn
                         ? getTurnColorClass(
-                            row.regularTurn,
+                            row.substitutedTurn ?? row.regularTurn,
                             row.target_date,
                             holidays,
                             weekendHolidayTurns,
-                            jigeunTurns
+                            jigeunTurns,
+                            row.substitutedTurn != null
                           )
                         : ""
                     )}
                   >
-                    {row.regularTurn ?? "-"}
+                    {row.substitutedTurn ? (
+                      // 운휴대기 칸은 원래근무(위)/대치근무(아래) 두 줄로 보여준다.
+                      <span className="flex flex-col leading-tight">
+                        <span>{row.regularTurn}</span>
+                        <span className="text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                          {row.substitutedTurn}
+                        </span>
+                      </span>
+                    ) : (
+                      row.regularTurn ?? "-"
+                    )}
                     {(() => {
-                      // 한 줄짜리 셀이라 근무번호 옆에 붙인다.
-                      const kind = row.regularTurn
-                        ? getJigeunKind(row.regularTurn, jigeunTurns)
-                        : null;
+                      // 지근 배지는 치환 후 값 기준(치환이 없으면 원본과 같다).
+                      const turn = row.substitutedTurn ?? row.regularTurn;
+                      const kind = turn ? getJigeunKind(turn, jigeunTurns) : null;
                       return kind ? (
                         <span className="ml-1 text-[10px] font-bold text-sky-700 dark:text-sky-300">
                           {getJigeunBadgeLabel(kind)}
