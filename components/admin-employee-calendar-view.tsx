@@ -16,7 +16,6 @@ import {
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   parseHolidayTurnRulesText,
-  isJigeunTurn,
   getJigeunKind,
   getJigeunBadgeLabel,
 } from "@/lib/types";
@@ -28,6 +27,9 @@ import {
   getDayName,
   applyHolidayTurnRules,
   applyHolidayTurnRulesByStaffKey,
+  padDateRange,
+  getTurnDisplay,
+  isHueTurnOnDate,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -54,6 +56,10 @@ export function AdminEmployeeCalendarView({
   monthValue,
 }: AdminEmployeeCalendarViewProps) {
   const [regularMap, setRegularMap] = useState<Map<string, string>>(new Map());
+  // 월 밖(전월 말일·익월 1일) 근무. 연휴 짝 판정에만 쓰고 집계·표시에는 쓰지 않는다.
+  const [regularContext, setRegularContext] = useState<Map<string, string>>(
+    new Map()
+  );
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialSchedule>>(
     new Map()
   );
@@ -76,12 +82,29 @@ export function AdminEmployeeCalendarView({
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
 
+  // 화면 표시용 근무 맵(운휴대기 치환 적용). 아래 monthStats 의 휴무 판정에도 쓴다.
+  const displayTurnMap = useMemo(
+    () =>
+      applyHolidayTurnRules(
+        regularMap,
+        holidays,
+        holidayTurnRules,
+        regularContext
+      ),
+    [regularMap, holidays, holidayTurnRules, regularContext]
+  );
+
+  // 휴무는 치환 후 근무번호로 세고(화면 표시와 일치), 운휴·지근·지휴는 원본 기준.
   const monthStats = useMemo(() => {
     let hueCount = 0;
     let weekendTurnCount = 0;
     for (const [date, turn] of regularMap) {
       if (!isSameMonth(date, monthValue)) continue;
-      if (turn.includes("휴") && !isJigeunTurn(turn, jigeunTurns)) hueCount++;
+      // 휴무는 운휴대기 치환 후 값으로 판정한다(화면 표시와 일치).
+      if (isHueTurnOnDate(date, regularMap, displayTurnMap, jigeunTurns)) {
+        hueCount++;
+      }
+      // 운휴는 계속 원본 근무번호 기준.
       const dayName = getDayName(date);
       const isHoliday =
         dayName === "토" || dayName === "일" || holidays.has(date);
@@ -98,14 +121,15 @@ export function AdminEmployeeCalendarView({
 
     const totalRest = hueCount + weekendTurnCount + jihyuCount - jigeunCount;
     return { hueCount, weekendTurnCount, jigeunCount, jihyuCount, totalRest };
-  }, [regularMap, specialMap, holidays, monthValue, weekendHolidayTurns, jigeunTurns]);
-
-  // 화면 표시용 근무 맵(연휴 짝 치환 적용).
-  // 위 monthStats 는 원본 regularMap 을 그대로 쓴다 — 집계는 원래 근무번호 기준.
-  const displayTurnMap = useMemo(
-    () => applyHolidayTurnRules(regularMap, holidays, holidayTurnRules),
-    [regularMap, holidays, holidayTurnRules]
-  );
+  }, [
+    regularMap,
+    displayTurnMap,
+    specialMap,
+    holidays,
+    monthValue,
+    weekendHolidayTurns,
+    jigeunTurns,
+  ]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -114,14 +138,16 @@ export function AdminEmployeeCalendarView({
     const [year, month] = monthValue.split("-").map(Number);
     const start = format(startOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
+    // 월 경계에 걸친 연휴 짝을 판정하려면 앞뒤 하루가 더 필요하다.
+    const padded = padDateRange(start, end);
 
     try {
       const [scheduleResult, specialResult, holidayResult, settingsResult] =
         await Promise.all([
           supabase
             .rpc("get_schedule_by_range", {
-              p_start_date: start,
-              p_end_date: end,
+              p_start_date: padded.start,
+              p_end_date: padded.end,
             })
             .range(0, 10000),
           supabase
@@ -134,8 +160,8 @@ export function AdminEmployeeCalendarView({
             .from("holidays")
             .select("locdate")
             .eq("is_holiday", "Y")
-            .gte("locdate", start)
-            .lte("locdate", end),
+            .gte("locdate", padded.start)
+            .lte("locdate", padded.end),
           supabase
             .from("app_settings")
             .select("weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
@@ -175,25 +201,35 @@ export function AdminEmployeeCalendarView({
         (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
       );
 
+      // 조회는 앞뒤 하루를 더 받지만, 월 밖의 날짜는 짝 판정용 context 로만 쓰고
+      // 화면·집계용 맵에는 넣지 않는다.
       const regularByStaff = new Map<string, string>();
+      const contextByStaff = new Map<string, string>();
       const rMap = new Map<string, string>();
+      const rContext = new Map<string, string>();
       for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
         if (!dateStr) continue;
-        regularByStaff.set(`${row.staff_id}|${dateStr}`, row.turn);
+        const inMonth = dateStr >= start && dateStr <= end;
+        const key = `${row.staff_id}|${dateStr}`;
+        if (inMonth) regularByStaff.set(key, row.turn);
+        else contextByStaff.set(key, row.turn);
         if (row.staff_id === staff.staff_id) {
-          rMap.set(dateStr, row.turn);
+          if (inMonth) rMap.set(dateStr, row.turn);
+          else rContext.set(dateStr, row.turn);
         }
       }
       setRegularMap(rMap);
+      setRegularContext(rContext);
 
       // 신청 내역에 표시되는 근무도 동일하게 치환한다.
       const displayByStaff = applyHolidayTurnRulesByStaffKey(
         regularByStaff,
         holidaySet,
-        holidayRules
+        holidayRules,
+        contextByStaff
       );
 
       const list = (specialResult.data ?? []) as Array<{
@@ -337,6 +373,8 @@ export function AdminEmployeeCalendarView({
           ))}
           {grid.map((date) => {
             const inMonth = isSameMonth(date, monthValue);
+            // 운휴대기 치환 칸은 원래근무(위)/대치근무(아래)를 함께 보여준다.
+            const display = getTurnDisplay(date, regularMap, displayTurnMap);
             const turn = displayTurnMap.get(date);
             const entries = allEntriesMap.get(date) ?? [];
             const turnBgClass = turn
@@ -345,7 +383,8 @@ export function AdminEmployeeCalendarView({
                   date,
                   holidays,
                   weekendHolidayTurns,
-                  jigeunTurns
+                  jigeunTurns,
+                  display?.substituted != null
                 )
               : "";
             // 배경색과 같은 값(연휴 치환 후 turn)으로 판정해야 색과 배지가 어긋나지 않는다.
@@ -371,9 +410,14 @@ export function AdminEmployeeCalendarView({
                 >
                   {Number(date.slice(8, 10))}
                 </span>
-                {turn && (
+                {display && (
                   <span className="text-sm font-semibold truncate text-center text-foreground">
-                    {turn}
+                    {display.original}
+                  </span>
+                )}
+                {display?.substituted && (
+                  <span className="text-[10px] font-bold leading-none text-center text-sky-700 dark:text-sky-300 truncate">
+                    {display.substituted}
                   </span>
                 )}
                 {jigeunKind && (
@@ -417,7 +461,16 @@ export function AdminEmployeeCalendarView({
         employee={targetEmployee}
         date={selectedDate}
         regularTurn={
-          selectedDate ? displayTurnMap.get(selectedDate) ?? null : null
+          selectedDate
+            ? getTurnDisplay(selectedDate, regularMap, displayTurnMap)
+                ?.original ?? null
+            : null
+        }
+        substitutedTurn={
+          selectedDate
+            ? getTurnDisplay(selectedDate, regularMap, displayTurnMap)
+                ?.substituted ?? null
+            : null
         }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}

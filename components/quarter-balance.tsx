@@ -8,10 +8,16 @@ import type { RecordType, ScheduleRecord } from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
+  DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
-  isJigeunTurn,
+  parseHolidayTurnRulesText,
 } from "@/lib/types";
-import { getDayName } from "@/lib/schedule-utils";
+import {
+  getDayName,
+  padDateRange,
+  applyHolidayTurnRulesByStaffKey,
+  isHueTurnOnDate,
+} from "@/lib/schedule-utils";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -98,6 +104,8 @@ export function QuarterBalance() {
     setHasFetched(true);
     const { start, end } = quarterRange(year, quarter);
     const months = quarterMonths(year, quarter);
+    // 분기 경계에 걸친 운휴대기 짝도 판정하려면 앞뒤로 여유가 필요하다.
+    const padded = padDateRange(start, end);
 
     try {
       const [
@@ -109,11 +117,12 @@ export function QuarterBalance() {
       ] = await Promise.all([
         // RPC 10,000행 한도 회피: 월 단위로 나눠 호출 후 합산
         Promise.all(
-          months.map((m) =>
+          months.map((m, i) =>
             supabase
               .rpc("get_schedule_by_range", {
-                p_start_date: m.start,
-                p_end_date: m.end,
+                // 첫 달은 앞으로, 마지막 달은 뒤로 여유를 둔다(분기 경계 짝 판정용).
+                p_start_date: i === 0 ? padded.start : m.start,
+                p_end_date: i === months.length - 1 ? padded.end : m.end,
               })
               .range(0, 100000)
           )
@@ -127,14 +136,16 @@ export function QuarterBalance() {
           .from("holidays")
           .select("locdate")
           .eq("is_holiday", "Y")
-          .gte("locdate", start)
-          .lte("locdate", end),
+          .gte("locdate", padded.start)
+          .lte("locdate", padded.end),
         supabase
           .from("coworker_list")
           .select("staff_id, staff_name, staff_position, employee_number"),
         supabase
           .from("app_settings")
-          .select("weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns")
+          .select(
+            "weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules"
+          )
           .eq("id", 1)
           .maybeSingle(),
       ]);
@@ -152,7 +163,11 @@ export function QuarterBalance() {
         weekend_holiday_turns: string | null;
         jigeun_day_turns: string | null;
         jigeun_night_turns: string | null;
+        holiday_turn_rules: string | null;
       } | null;
+      const holidayRules = settings
+        ? parseHolidayTurnRulesText(settings.holiday_turn_rules)
+        : DEFAULT_HOLIDAY_TURN_RULES;
       const weekendHolidayTurns = settings
         ? parseTurnsText(settings.weekend_holiday_turns)
         : DEFAULT_WEEKEND_HOLIDAY_TURNS;
@@ -201,14 +216,39 @@ export function QuarterBalance() {
         return r;
       };
 
-      // 정규 근무표: 휴무 / 운휴 집계 (user-calendar 로직 그대로)
+      // 운휴대기 치환 맵. 분기 밖(패딩) 날짜는 짝 판정용 context 로만 쓴다 —
+      // 집계에 섞이면 분기 휴무 수가 부풀려진다.
+      const regularByStaff = new Map<string, string>();
+      const contextByStaff = new Map<string, string>();
       for (const row of scheduleData) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
         if (!dateStr) continue;
+        const key = `${row.staff_id}|${dateStr}`;
+        if (dateStr >= start && dateStr <= end) regularByStaff.set(key, row.turn);
+        else contextByStaff.set(key, row.turn);
+      }
+      const displayByStaff = applyHolidayTurnRulesByStaffKey(
+        regularByStaff,
+        holidays,
+        holidayRules,
+        contextByStaff
+      );
+
+      // 정규 근무표: 휴무 / 운휴 집계 (user-calendar 로직 그대로).
+      // 휴무는 치환 후 근무번호 기준, 운휴는 원본 기준.
+      for (const row of scheduleData) {
+        const dateStr = row.date
+          ? format(new Date(row.date), "yyyy-MM-dd")
+          : "";
+        if (!dateStr) continue;
+        if (dateStr < start || dateStr > end) continue; // 패딩 날짜는 집계 제외
         const r = ensure(row.staff_id);
-        if (row.turn.includes("휴") && !isJigeunTurn(row.turn, jigeunTurns)) r.hueCount++;
+        const key = `${row.staff_id}|${dateStr}`;
+        if (isHueTurnOnDate(key, regularByStaff, displayByStaff, jigeunTurns)) {
+          r.hueCount++;
+        }
         const dayName = getDayName(dateStr);
         const isHoliday =
           dayName === "토" || dayName === "일" || holidays.has(dateStr);

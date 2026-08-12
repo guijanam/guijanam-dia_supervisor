@@ -19,7 +19,6 @@ import {
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   parseHolidayTurnRulesText,
-  isJigeunTurn,
   getJigeunKind,
   getJigeunBadgeLabel,
 } from "@/lib/types";
@@ -32,6 +31,9 @@ import {
   getDayName,
   getPositionCap,
   applyHolidayTurnRulesByStaffKey,
+  padDateRange,
+  getTurnDisplay,
+  isHueTurnOnDate,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -70,6 +72,8 @@ interface SpecialEntry {
   staff_position: string;
   record_type: RecordType;
   regularTurn: string | null;
+  // 운휴대기(연휴 짝 치환) 대치근무. 치환이 없으면 null.
+  substitutedTurn: string | null;
   lottery_status: LotteryStatus | null;
   lottery_at: string | null;
 }
@@ -145,6 +149,8 @@ export function AdminCalendar() {
     const [year, month] = monthValue.split("-").map(Number);
     const start = format(startOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
     const end = format(endOfMonth(new Date(year, month - 1)), "yyyy-MM-dd");
+    // 월 경계에 걸친 연휴 짝을 판정하려면 앞뒤 하루가 더 필요하다.
+    const padded = padDateRange(start, end);
 
     try {
       const [specialResult, holidayResult, scheduleResult, settingsResult] =
@@ -161,12 +167,12 @@ export function AdminCalendar() {
             .from("holidays")
             .select("locdate")
             .eq("is_holiday", "Y")
-            .gte("locdate", start)
-            .lte("locdate", end),
+            .gte("locdate", padded.start)
+            .lte("locdate", padded.end),
           supabase
             .rpc("get_schedule_by_range", {
-              p_start_date: start,
-              p_end_date: end,
+              p_start_date: padded.start,
+              p_end_date: padded.end,
             })
             .range(0, 10000),
           supabase
@@ -223,18 +229,24 @@ export function AdminCalendar() {
       );
 
       // (staff_id, 날짜) → 원래 근무(turn) 매핑 — entry.regularTurn 채우기에만 사용.
+      // 월 밖(앞뒤 하루)의 근무는 짝 판정용 context 로만 쓰고 맵에는 넣지 않는다.
       const regularMap = new Map<string, string>();
+      const contextMap = new Map<string, string>();
       for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
-        if (dateStr) regularMap.set(`${row.staff_id}|${dateStr}`, row.turn);
+        if (!dateStr) continue;
+        const key = `${row.staff_id}|${dateStr}`;
+        if (dateStr >= start && dateStr <= end) regularMap.set(key, row.turn);
+        else contextMap.set(key, row.turn);
       }
       // 표시용 치환 맵 (연휴 짝 규칙 적용)
       const displayRegularMap = applyHolidayTurnRulesByStaffKey(
         regularMap,
         holidaySet,
-        holidayRules
+        holidayRules,
+        contextMap
       );
 
       const list = (specialResult.data ?? []) as Array<{
@@ -276,7 +288,13 @@ export function AdminCalendar() {
           staff_position: emp?.staff_position ?? "",
           record_type: row.record_type,
           regularTurn:
-            displayRegularMap.get(`${row.staff_id}|${row.target_date}`) ?? null,
+            regularMap.get(`${row.staff_id}|${row.target_date}`) ?? null,
+          substitutedTurn:
+            getTurnDisplay(
+              `${row.staff_id}|${row.target_date}`,
+              regularMap,
+              displayRegularMap
+            )?.substituted ?? null,
           lottery_status: row.lottery_status ?? null,
           lottery_at: row.lottery_at ?? null,
         };
@@ -497,13 +515,15 @@ export function AdminCalendar() {
     const monthEnd = endOfMonth(monthStart);
     const start = format(monthStart, "yyyy-MM-dd");
     const end = format(monthEnd, "yyyy-MM-dd");
+    // 월 경계에 걸친 연휴 짝을 판정하려면 앞뒤 하루가 더 필요하다.
+    const padded = padDateRange(start, end);
 
     const [scheduleResult, specialResult, holidayResult, empResult] =
       await Promise.all([
         supabase
           .rpc("get_schedule_by_range", {
-            p_start_date: start,
-            p_end_date: end,
+            p_start_date: padded.start,
+            p_end_date: padded.end,
           })
           .range(0, 100000),
         supabase
@@ -515,8 +535,8 @@ export function AdminCalendar() {
           .from("holidays")
           .select("locdate")
           .eq("is_holiday", "Y")
-          .gte("locdate", start)
-          .lte("locdate", end),
+          .gte("locdate", padded.start)
+          .lte("locdate", padded.end),
         supabase
           .from("coworker_list")
           .select("staff_id, staff_name, staff_position, employee_number")
@@ -542,15 +562,21 @@ export function AdminCalendar() {
     }
 
     // (staff_id|날짜) → 원래 교번. 통계는 이 원본을 쓰고, 표시는 치환본을 쓴다.
+    // 월 밖(앞뒤 하루)의 근무는 짝 판정용 context 로만 쓰고 맵에는 넣지 않는다.
     const regularByStaff = new Map<string, string>();
+    const contextByStaff = new Map<string, string>();
     for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
       const dateStr = row.date ? format(new Date(row.date), "yyyy-MM-dd") : "";
-      if (dateStr) regularByStaff.set(`${row.staff_id}|${dateStr}`, row.turn);
+      if (!dateStr) continue;
+      const key = `${row.staff_id}|${dateStr}`;
+      if (dateStr >= start && dateStr <= end) regularByStaff.set(key, row.turn);
+      else contextByStaff.set(key, row.turn);
     }
     const displayByStaff = applyHolidayTurnRulesByStaffKey(
       regularByStaff,
       holidaySet,
-      holidayTurnRules
+      holidayTurnRules,
+      contextByStaff
     );
 
     const specialByStaff = new Map<string, RecordType>();
@@ -606,13 +632,18 @@ export function AdminCalendar() {
         const cells = allDates.map((date) => {
           const key = `${emp.staff_id}|${date}`;
           const rawTurn = regularByStaff.get(key);
-          // 휴가 포함 근무 / 운휴 여부 — 화면(getTurnColorClass)과 동일한 판정.
+          // 휴무는 운휴대기 치환 후 값으로 판정한다(화면·달력 집계와 동일).
+          // 운휴는 계속 원본 근무번호 기준.
           // 지정근무 번호(예: 휴(지))는 화면에서 하늘색이므로 휴무에서 제외한다.
           let isHue = false;
           let isWeekendTurn = false;
           if (rawTurn) {
-            isHue =
-              rawTurn.includes("휴") && !isJigeunTurn(rawTurn, jigeunTurns);
+            isHue = isHueTurnOnDate(
+              key,
+              regularByStaff,
+              displayByStaff,
+              jigeunTurns
+            );
             if (isHue) hueCount++;
             const dayName = getDayName(date);
             const isHoliday =
@@ -626,17 +657,26 @@ export function AdminCalendar() {
           else if (special === "지휴") jihyuCount++;
 
           const turn = displayByStaff.get(key) ?? "";
+          // 운휴대기 치환 칸은 원래근무(윗줄)/대치근무(아랫줄) 두 줄로 적는다.
+          const substituted =
+            getTurnDisplay(key, regularByStaff, displayByStaff)?.substituted ??
+            null;
+          const turnText = substituted ? `${rawTurn}\n${substituted}` : turn;
           // 지정근무면 근무번호 뒤에 지(주)/지(야)를 덧붙인다. 신청(지근/지휴)이
           // 있는 날은 기존처럼 그 신청 구분을 우선 표시한다.
           const kind = turn ? getJigeunKind(turn, jigeunTurns) : null;
           const text = !special
             ? kind
-              ? `${turn} ${getJigeunBadgeLabel(kind)}`
-              : turn
-            : turn
-              ? `${turn}(${special})`
+              ? `${turnText} ${getJigeunBadgeLabel(kind)}`
+              : turnText
+            : turnText
+              ? `${turnText}(${special})`
               : special;
-          return { text, isRest: isHue || isWeekendTurn };
+          return {
+            text,
+            isRest: isHue || isWeekendTurn,
+            isSubstituted: substituted != null,
+          };
         });
 
         const row = ws.addRow([
@@ -645,15 +685,23 @@ export function AdminCalendar() {
           hueCount + weekendTurnCount + jihyuCount - jigeunCount,
           ...cells.map((c) => c.text),
         ]);
-        row.alignment = { horizontal: "center" };
+        // 운휴대기 칸은 두 줄이라 줄바꿈을 켠다.
+        row.alignment = { horizontal: "center", wrapText: true };
         row.getCell(2).alignment = { horizontal: "left" };
-        // 휴가 포함 근무·운휴는 빨간 바탕 (화면의 bg-red-100 에 대응).
+        // 화면(getTurnColorClass)과 동일한 규칙:
+        // 휴무·운휴로 집계되는 칸은 빨간 바탕(bg-red-100), 그 외 운휴대기 치환 칸은
+        // 하늘색(bg-sky-100). isRest 는 이미 치환 후 값 기준이라 휴77 등은 빨강이 된다.
         cells.forEach((c, i) => {
-          if (c.isRest) {
+          const argb = c.isRest
+            ? "FFFEE2E2"
+            : c.isSubstituted
+              ? "FFE0F2FE"
+              : null;
+          if (argb) {
             row.getCell(i + 4).fill = {
               type: "pattern",
               pattern: "solid",
-              fgColor: { argb: "FFFEE2E2" },
+              fgColor: { argb },
             };
           }
         });
@@ -1028,6 +1076,12 @@ export function AdminCalendar() {
                             <span className="font-medium">
                               {e.regularTurn ?? "-"}
                             </span>
+                            {e.substitutedTurn && (
+                              <span className="ml-0.5 font-bold text-sky-700 dark:text-sky-300">
+                                {" → "}
+                                {e.substitutedTurn}
+                              </span>
+                            )}
                           </span>
                           <div className="flex items-center gap-1">
                             <select
