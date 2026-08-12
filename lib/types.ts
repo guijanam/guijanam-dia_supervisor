@@ -137,19 +137,27 @@ export function validateJigeunTurns(
   return null;
 }
 
-// 연휴(토/일/공휴일) 이틀 연속일 때만 치환되는 근무번호 짝.
-// 예: ('58','58~') 가 연속 이틀 모두 휴일이면 그 이틀을 ('휴73','휴74') 로 표시.
+// 연휴에 걸린 연속 근무를 다른 코드로 '표시만' 바꾸는 규칙.
+// from/to 는 길이가 같은 배열이며 2개 이상이면 된다(2일 짝, 3일 짝, …).
+// 예: ('58','58~') → ('휴73','휴74')
+//     ('61','61~','휴14') → ('휴79','지(야)','지(야)~')
+//
+// 휴일 조건: 연휴 판정은 '앞 2일'만 본다. 즉 N일·N+1일이 모두 토/일/공휴일이면
+// 짝이 성립하고, 3일째부터는 휴일 여부와 무관하게 함께 치환된다
+// (연휴 다음 근무일까지 이어지는 근무를 표현하기 위함).
 // 표시 전용이며 통계(휴무/운휴/총휴/분기밸런스)는 항상 원래 turn 을 사용한다.
 export interface HolidayTurnRule {
-  fromA: string; // N일 원래 근무번호
-  fromB: string; // N+1일 원래 근무번호
-  toA: string; // N일 표시 근무번호
-  toB: string; // N+1일 표시 근무번호
+  from: string[]; // N일부터 연속된 원래 근무번호
+  to: string[]; // 같은 순서의 표시 근무번호 (from 과 길이 동일)
 }
+
+// 연휴 판정에 요구되는 최소 연속 휴일 수. 3일 이상 짝이어도 앞 2일만 본다.
+export const HOLIDAY_PAIR_REQUIRED_DAYS = 2;
 
 export const DEFAULT_HOLIDAY_TURN_RULES: HolidayTurnRule[] = [];
 
-// '58,58~:휴73,휴74;62,62~:휴75,휴76' ↔ HolidayTurnRule[]
+// '58,58~:휴73,휴74;61,61~,휴14:휴79,지(야),지(야)~' ↔ HolidayTurnRule[]
+// 각 그룹은 '원래들:표시들' 이고 양쪽 개수가 같아야 하며 2개 이상이어야 한다.
 // 형식이 깨진 그룹은 조용히 버린다(전체 실패 금지 — 잘못 저장된 설정 하나가
 // 전 직원 근무표를 못 그리게 만들면 안 됨). 저장 시점 검증은 validate 쪽에서.
 export function parseHolidayTurnRulesText(
@@ -164,15 +172,16 @@ export function parseHolidayTurnRulesText(
     if (parts.length !== 2) continue;
     const from = parts[0].split(",").map((t) => t.trim());
     const to = parts[1].split(",").map((t) => t.trim());
-    if (from.length !== 2 || to.length !== 2) continue;
+    if (from.length !== to.length) continue;
+    if (from.length < HOLIDAY_PAIR_REQUIRED_DAYS) continue;
     if (from.some((t) => !t) || to.some((t) => !t)) continue;
-    rules.push({ fromA: from[0], fromB: from[1], toA: to[0], toB: to[1] });
+    rules.push({ from, to });
   }
   return rules;
 }
 
 export function formatHolidayTurnRulesText(rules: HolidayTurnRule[]): string {
-  return rules.map((r) => `${r.fromA},${r.fromB}:${r.toA},${r.toB}`).join(";");
+  return rules.map((r) => `${r.from.join(",")}:${r.to.join(",")}`).join(";");
 }
 
 // 관리자 저장 시 보여줄 검증 메시지. null 이면 통과.
@@ -184,12 +193,12 @@ export function validateHolidayTurnRulesText(raw: string): string | null {
     .filter((g) => g.length > 0);
   const parsed = parseHolidayTurnRulesText(raw);
   if (groups.length !== parsed.length) {
-    return "형식이 올바르지 않습니다. 예: 58,58~:휴73,휴74;62,62~:휴75,휴76";
+    return "형식이 올바르지 않습니다. 원래/표시 근무번호 개수가 같아야 하며 2개 이상이어야 합니다. 예: 58,58~:휴73,휴74;61,61~,휴14:휴79,지(야),지(야)~";
   }
   const seen = new Set<string>();
   for (const r of parsed) {
-    const key = `${r.fromA}|${r.fromB}`;
-    if (seen.has(key)) return `중복된 짝이 있습니다: ${r.fromA},${r.fromB}`;
+    const key = r.from.join("|");
+    if (seen.has(key)) return `중복된 짝이 있습니다: ${r.from.join(",")}`;
     seen.add(key);
   }
   return null;
