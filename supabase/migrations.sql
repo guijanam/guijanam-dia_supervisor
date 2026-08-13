@@ -438,3 +438,46 @@ create index if not exists coworker_list_pattern_idx
 alter table public.app_settings
   add column if not exists jigeun_day_turns   text not null default '',
   add column if not exists jigeun_night_turns text not null default '';
+
+-- ============================================================
+-- 19) special_schedules → coworker_list 외래키 ------------------
+--  [배경]
+--  staff_id 284 로 지근 신청 3건이 남아 있는데 coworker_list 에는 그 직원이
+--  없는 상태가 발견됐다. 관리자 화면에는 이름 대신 '(미상 284)' 로 표시된다.
+--  (미상 표시는 emp?.staff_name ?? `(미상 ${staff_id})` 폴백이다 —
+--   저장된 이름이 아니라 조회 실패의 흔적이다.)
+--
+--  원인은 두 가지가 겹친 것:
+--   ① special_schedules.staff_id 에 FK 가 없어 직원을 지워도 신청이 남는다.
+--   ② 세션이 localStorage 복사본이라, 삭제된 직원도 로그아웃되지 않고
+--      계속 신청할 수 있다(앱 코드에서 별도 수정).
+--
+--  여기서는 ① 을 막는다. 이후로는 없는 staff_id 로 insert 자체가 거부되고,
+--  직원 삭제 시 그 직원의 신청도 함께 정리된다.
+--
+--  [선행 조건 — 2026-08 확인 완료]
+--  - coworker_list 의 PK 가 staff_id 임을 확인했다(coworker_list_pkey).
+--    FK 대상으로 바로 쓸 수 있다.
+--  - 고아 레코드는 staff_id 284 의 3건이 마지막이었고 정리 완료. 아래 쿼리가
+--    빈 결과여야 이 문장이 성공한다(남아 있으면 에러로 롤백된다):
+--      select s.staff_id, count(*)
+--        from public.special_schedules s
+--        left join public.coworker_list c on c.staff_id = s.staff_id
+--       where c.staff_id is null
+--       group by s.staff_id;
+--
+--  [on delete cascade 를 고른 이유]
+--  퇴사자의 지근/지휴 신청은 그 직원이 사라지면 의미가 없고, 남겨두면
+--  '(미상 N)' 으로 관리자 화면과 엑셀에 계속 노출된다. 신청 이력을 보존해야
+--  한다면 cascade 대신 restrict 로 바꾸고 퇴사 처리를 '삭제' 가 아니라
+--  '비활성 플래그' 로 운영해야 한다 — 그건 별도 결정이다.
+--
+--  ⚠ 실행 전 위 고아 레코드 확인 쿼리가 빈 결과인지 볼 것. 남아 있으면
+--    이 문장은 에러로 롤백된다(데이터가 손상되지는 않는다).
+-- ============================================================
+alter table public.special_schedules
+  drop constraint if exists special_schedules_staff_fk;
+alter table public.special_schedules
+  add constraint special_schedules_staff_fk
+  foreign key (staff_id) references public.coworker_list (staff_id)
+  on delete cascade;
