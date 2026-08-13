@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
+import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import type {
   RecordType,
   ScheduleRecord,
@@ -164,7 +165,7 @@ export function RequestsPanel({
     try {
       const [
         { data: schedules, error: qErr },
-        scheduleResult,
+        fetchedScheduleRows,
         settingsResult,
         holidayResult,
       ] = await Promise.all([
@@ -174,12 +175,7 @@ export function RequestsPanel({
           .gte("target_date", start)
           .lte("target_date", end)
           .order("target_date", { ascending: true }),
-        supabase
-          .rpc("get_schedule_by_range", {
-            p_start_date: padded.start,
-            p_end_date: padded.end,
-          })
-          .range(0, 10000),
+        fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("app_settings")
           .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
@@ -194,7 +190,6 @@ export function RequestsPanel({
       ]);
 
       if (qErr) throw qErr;
-      if (scheduleResult.error) throw scheduleResult.error;
 
       const s = settingsResult.data as {
         jigeun_cap_weekday: number;
@@ -249,7 +244,7 @@ export function RequestsPanel({
       // 조회는 앞뒤 하루를 더 받지만, 월 밖의 날짜는 짝 판정용 context 로만 쓰고
       // regularMap 에는 넣지 않는다 — 아래 자동 지근 판정·행 생성이 이 맵을 그대로
       // 순회하므로 월 밖 근무가 섞이면 없는 신청이 생긴다.
-      const scheduleRows = (scheduleResult.data ?? []) as ScheduleRecord[];
+      const scheduleRows = fetchedScheduleRows;
       const regularMap = new Map<string, string>();
       const contextMap = new Map<string, string>();
       const inMonthRows: ScheduleRecord[] = [];

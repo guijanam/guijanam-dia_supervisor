@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import type {
   ScheduleRecord,
   PositionTab,
@@ -58,13 +59,8 @@ export function ScheduleViewer() {
     try {
       // 조회 범위 경계(월말 등)에 걸친 연휴 짝도 판정하려면 앞뒤 하루가 더 필요하다.
       const padded = padDateRange(start, end);
-      const [scheduleResult, holidayResult, settingsResult] = await Promise.all([
-        supabase
-          .rpc("get_schedule_by_range", {
-            p_start_date: padded.start,
-            p_end_date: padded.end,
-          })
-          .range(0, 10000),
+      const [scheduleRows, holidayResult, settingsResult] = await Promise.all([
+        fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("holidays")
           .select("locdate")
@@ -77,8 +73,6 @@ export function ScheduleViewer() {
           .eq("id", 1)
           .maybeSingle(),
       ]);
-
-      if (scheduleResult.error) throw scheduleResult.error;
 
       const holidayDates = new Set<string>(
         (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
@@ -108,13 +102,13 @@ export function ScheduleViewer() {
           : DEFAULT_HOLIDAY_TURN_RULES
       );
 
-      if (!scheduleResult.data || scheduleResult.data.length === 0) {
+      if (scheduleRows.length === 0) {
         setAllData([]);
         setDateRange(generateDateRange(start, end));
         return;
       }
 
-      setAllData(scheduleResult.data as ScheduleRecord[]);
+      setAllData(scheduleRows);
       setDateRange(generateDateRange(start, end));
     } catch (err) {
       const message = err instanceof Error ? err.message : "데이터 로딩 실패";

@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
+import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import { useAuth } from "@/lib/auth-context";
 import type {
   RecordType,
-  ScheduleRecord,
   LotteryStatus,
   JigeunCaps,
   HolidayTurnRule,
@@ -154,7 +154,7 @@ export function AdminCalendar() {
     const padded = padDateRange(start, end);
 
     try {
-      const [specialResult, holidayResult, scheduleResult, settingsResult] =
+      const [specialResult, holidayResult, scheduleRows, settingsResult] =
         await Promise.all([
           supabase
             .from("special_schedules")
@@ -170,12 +170,7 @@ export function AdminCalendar() {
             .eq("is_holiday", "Y")
             .gte("locdate", padded.start)
             .lte("locdate", padded.end),
-          supabase
-            .rpc("get_schedule_by_range", {
-              p_start_date: padded.start,
-              p_end_date: padded.end,
-            })
-            .range(0, 10000),
+          fetchScheduleByRange(padded.start, padded.end),
           supabase
             .from("app_settings")
             .select(
@@ -186,7 +181,6 @@ export function AdminCalendar() {
         ]);
 
       if (specialResult.error) throw specialResult.error;
-      if (scheduleResult.error) throw scheduleResult.error;
 
       const s = settingsResult.data as {
         jigeun_cap_weekday: number;
@@ -233,7 +227,7 @@ export function AdminCalendar() {
       // 월 밖(앞뒤 하루)의 근무는 짝 판정용 context 로만 쓰고 맵에는 넣지 않는다.
       const regularMap = new Map<string, string>();
       const contextMap = new Map<string, string>();
-      for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+      for (const row of scheduleRows) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
@@ -520,14 +514,9 @@ export function AdminCalendar() {
     // 월 경계에 걸친 연휴 짝을 판정하려면 앞뒤 하루가 더 필요하다.
     const padded = padDateRange(start, end);
 
-    const [scheduleResult, specialResult, holidayResult, empResult] =
+    const [exportScheduleRows, specialResult, holidayResult, empResult] =
       await Promise.all([
-        supabase
-          .rpc("get_schedule_by_range", {
-            p_start_date: padded.start,
-            p_end_date: padded.end,
-          })
-          .range(0, 100000),
+        fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("special_schedules")
           .select("staff_id, target_date, record_type")
@@ -546,7 +535,6 @@ export function AdminCalendar() {
           .order("staff_name", { ascending: true }),
       ]);
 
-    if (scheduleResult.error) throw scheduleResult.error;
     if (specialResult.error) throw specialResult.error;
     if (empResult.error) throw empResult.error;
 
@@ -567,7 +555,7 @@ export function AdminCalendar() {
     // 월 밖(앞뒤 하루)의 근무는 짝 판정용 context 로만 쓰고 맵에는 넣지 않는다.
     const regularByStaff = new Map<string, string>();
     const contextByStaff = new Map<string, string>();
-    for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+    for (const row of exportScheduleRows) {
       const dateStr = row.date ? format(new Date(row.date), "yyyy-MM-dd") : "";
       if (!dateStr) continue;
       const key = `${row.staff_id}|${dateStr}`;

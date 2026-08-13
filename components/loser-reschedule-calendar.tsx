@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import type {
   RecordType,
   LotteryStatus,
-  ScheduleRecord,
   HolidayTurnRule,
   JigeunTurnSettings,
 } from "@/lib/types";
@@ -103,13 +103,8 @@ export function LoserRescheduleCalendar({
     const padded = padDateRange(start, end);
 
     try {
-      const [scheduleResult, specialResult, holidayResult] = await Promise.all([
-        supabase
-          .rpc("get_schedule_by_range", {
-            p_start_date: padded.start,
-            p_end_date: padded.end,
-          })
-          .range(0, 10000),
+      const [scheduleRows, specialResult, holidayResult] = await Promise.all([
+        fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("special_schedules")
           .select("id, target_date, record_type, lottery_status")
@@ -125,7 +120,6 @@ export function LoserRescheduleCalendar({
           .lte("locdate", padded.end),
       ]);
 
-      if (scheduleResult.error) throw scheduleResult.error;
       if (specialResult.error) throw specialResult.error;
 
       const holidaySet = new Set<string>(
@@ -135,7 +129,7 @@ export function LoserRescheduleCalendar({
       // 조회는 앞뒤 하루를 더 받지만, 월 밖의 날짜는 짝 판정용 context 로만 쓴다.
       const rMap = new Map<string, string>();
       const rContext = new Map<string, string>();
-      for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+      for (const row of scheduleRows) {
         if (row.staff_id !== entry.staff_id) continue;
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")

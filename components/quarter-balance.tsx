@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
+import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import { useAuth } from "@/lib/auth-context";
 import type { RecordType, ScheduleRecord } from "@/lib/types";
 import {
@@ -115,16 +116,15 @@ export function QuarterBalance() {
         empResult,
         settingsResult,
       ] = await Promise.all([
-        // RPC 10,000행 한도 회피: 월 단위로 나눠 호출 후 합산
+        // 월 단위로 나눠 호출 후 합산. 각 호출은 내부에서 페이지네이션되므로
+        // 행 수 한도에 잘리지 않는다.
         Promise.all(
           months.map((m, i) =>
-            supabase
-              .rpc("get_schedule_by_range", {
-                // 첫 달은 앞으로, 마지막 달은 뒤로 여유를 둔다(분기 경계 짝 판정용).
-                p_start_date: i === 0 ? padded.start : m.start,
-                p_end_date: i === months.length - 1 ? padded.end : m.end,
-              })
-              .range(0, 100000)
+            fetchScheduleByRange(
+              // 첫 달은 앞으로, 마지막 달은 뒤로 여유를 둔다(분기 경계 짝 판정용).
+              i === 0 ? padded.start : m.start,
+              i === months.length - 1 ? padded.end : m.end
+            )
           )
         ),
         supabase
@@ -151,9 +151,8 @@ export function QuarterBalance() {
       ]);
 
       const scheduleData: ScheduleRecord[] = [];
-      for (const res of monthlySchedules) {
-        if (res.error) throw res.error;
-        scheduleData.push(...((res.data ?? []) as ScheduleRecord[]));
+      for (const rows of monthlySchedules) {
+        scheduleData.push(...rows);
       }
       if (specialResult.error) throw specialResult.error;
       if (holidayResult.error) throw holidayResult.error;

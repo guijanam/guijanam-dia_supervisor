@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import type {
   Employee,
   RecordType,
-  ScheduleRecord,
   SpecialSchedule,
   HolidayTurnRule,
   JigeunTurnSettings,
@@ -142,14 +142,9 @@ export function AdminEmployeeCalendarView({
     const padded = padDateRange(start, end);
 
     try {
-      const [scheduleResult, specialResult, holidayResult, settingsResult] =
+      const [scheduleRows, specialResult, holidayResult, settingsResult] =
         await Promise.all([
-          supabase
-            .rpc("get_schedule_by_range", {
-              p_start_date: padded.start,
-              p_end_date: padded.end,
-            })
-            .range(0, 10000),
+          fetchScheduleByRange(padded.start, padded.end),
           supabase
             .from("special_schedules")
             .select("id, staff_id, target_date, record_type")
@@ -169,7 +164,6 @@ export function AdminEmployeeCalendarView({
             .maybeSingle(),
         ]);
 
-      if (scheduleResult.error) throw scheduleResult.error;
       if (specialResult.error) throw specialResult.error;
 
       const settings = settingsResult.data as {
@@ -207,7 +201,7 @@ export function AdminEmployeeCalendarView({
       const contextByStaff = new Map<string, string>();
       const rMap = new Map<string, string>();
       const rContext = new Map<string, string>();
-      for (const row of (scheduleResult.data ?? []) as ScheduleRecord[]) {
+      for (const row of scheduleRows) {
         const dateStr = row.date
           ? format(new Date(row.date), "yyyy-MM-dd")
           : "";
