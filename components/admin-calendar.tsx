@@ -33,6 +33,7 @@ import {
   applyHolidayTurnRulesByStaffKey,
   padDateRange,
   getTurnDisplay,
+  getTurnExcelFill,
   isHueTurnOnDate,
 } from "@/lib/schedule-utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
@@ -508,7 +509,8 @@ export function AdminCalendar() {
   };
 
   // 월간 근무표 엑셀: 직책별 시트, 행=직원, 열=해당 월 날짜.
-  // 각 칸은 정규 교번에 지근/지휴를 병기한다(예: 58(지휴)).
+  // 각 칸은 정규 교번에 신청 구분을 병기한다. 지근은 한 줄(예: 58(지근)),
+  // 지휴는 운휴대기와 같이 두 줄(원래근무 / 지휴).
   const exportExcel = async () => {
     const [year, month] = monthValue.split("-").map(Number);
     const monthStart = startOfMonth(new Date(year, month - 1));
@@ -663,19 +665,30 @@ export function AdminCalendar() {
             null;
           const turnText = substituted ? `${rawTurn}\n${substituted}` : turn;
           // 지정근무면 근무번호 뒤에 지(주)/지(야)를 덧붙인다. 신청(지근/지휴)이
-          // 있는 날은 기존처럼 그 신청 구분을 우선 표시한다.
+          // 있는 날은 그 신청 구분을 우선 표시한다.
           const kind = turn ? getJigeunKind(turn, jigeunTurns) : null;
+          // 지휴 신청 칸은 운휴대기와 같은 방식으로 원래근무(윗줄)/지휴(아랫줄)
+          // 두 줄로 적는다. 지근은 기존처럼 한 줄로 병기한다(예: 58(지근)).
           const text = !special
             ? kind
               ? `${turnText} ${getJigeunBadgeLabel(kind)}`
               : turnText
-            : turnText
-              ? `${turnText}(${special})`
-              : special;
+            : special === "지휴"
+              ? turnText
+                ? `${turnText}\n${special}`
+                : special
+              : turnText
+                ? `${turnText}(${special})`
+                : special;
           return {
             text,
             isRest: isHue || isWeekendTurn,
             isSubstituted: substituted != null,
+            // 지정근무 배경색 판정용(치환 후 값). 위 kind 계산과 같은 기준이라
+            // 배경색과 지(주)/지(야) 배지가 항상 일치한다.
+            turn,
+            // 사용자가 신청한 지근/지휴. 배경색에서 가장 우선한다.
+            special: special ?? null,
           };
         });
 
@@ -688,15 +701,18 @@ export function AdminCalendar() {
         // 운휴대기 칸은 두 줄이라 줄바꿈을 켠다.
         row.alignment = { horizontal: "center", wrapText: true };
         row.getCell(2).alignment = { horizontal: "left" };
-        // 화면(getTurnColorClass)과 동일한 규칙:
-        // 휴무·운휴로 집계되는 칸은 빨간 바탕(bg-red-100), 그 외 운휴대기 치환 칸은
-        // 하늘색(bg-sky-100). isRest 는 이미 치환 후 값 기준이라 휴77 등은 빨강이 된다.
+        // 배경색 규칙은 getTurnExcelFill 에 모아둔다.
+        // 신청한 지근(진한 파랑)·지휴(진한 빨강)가 최우선, 그 다음 휴무·운휴(옅은 빨강),
+        // 운휴대기 치환과 지정근무(옅은 하늘색).
+        // isRest 는 이미 치환 후 값 기준이라 휴77 등은 빨강이 된다.
         cells.forEach((c, i) => {
-          const argb = c.isRest
-            ? "FFFEE2E2"
-            : c.isSubstituted
-              ? "FFE0F2FE"
-              : null;
+          const argb = getTurnExcelFill(
+            c.turn,
+            c.isRest,
+            c.isSubstituted,
+            jigeunTurns,
+            c.special
+          );
           if (argb) {
             row.getCell(i + 4).fill = {
               type: "pattern",
