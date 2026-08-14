@@ -872,6 +872,12 @@ export function RequestsPanel({
         >
           <Download className="h-4 w-4" /> Excel 다운로드
         </Button>
+        <span className="text-sm text-muted-foreground ml-auto">
+          총 {filtered.length}건
+        </span>
+      </div>
+
+      <div className="flex justify-end px-3 pb-3 sm:-mt-2">
         <Button
           size="sm"
           variant="destructive"
@@ -880,9 +886,6 @@ export function RequestsPanel({
         >
           <Trash2 className="h-4 w-4" /> 전체 삭제
         </Button>
-        <span className="text-sm text-muted-foreground ml-auto">
-          총 {filtered.length}건
-        </span>
       </div>
 
       {error && (
