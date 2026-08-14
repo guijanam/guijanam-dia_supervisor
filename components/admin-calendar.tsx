@@ -47,6 +47,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Download,
   Trash2,
   X,
@@ -122,11 +123,25 @@ export function AdminCalendar() {
 
   // 직원 검색 → 개인 뷰 전환 상태
   const [staffSearch, setStaffSearch] = useState("");
+  // 검색어 없이도 목록을 펼쳐 고를 수 있게 하는 드롭다운 열림 상태
+  const [staffListOpen, setStaffListOpen] = useState(false);
+  const [staffFilter, setStaffFilter] = useState<Position | "전체">("전체");
+  const staffPickerRef = useRef<HTMLDivElement | null>(null);
   const [viewStaff, setViewStaff] = useState<{
     staff_id: number;
     staff_name: string;
     staff_position: string;
   } | null>(null);
+
+  // 직책 필터 + 이름 검색을 함께 적용한 드롭다운 목록
+  const staffOptions = useMemo(() => {
+    const q = staffSearch.trim().toLowerCase();
+    return empList.filter(
+      (e) =>
+        (staffFilter === "전체" || e.staff_position === staffFilter) &&
+        (q === "" || e.staff_name.toLowerCase().includes(q))
+    );
+  }, [empList, staffFilter, staffSearch]);
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
 
@@ -349,6 +364,18 @@ export function AdminCalendar() {
       }
     })();
   }, []);
+
+  // 드롭다운 바깥을 누르면 닫는다.
+  useEffect(() => {
+    if (!staffListOpen) return;
+    const onPointerDown = (ev: PointerEvent) => {
+      if (!staffPickerRef.current?.contains(ev.target as Node)) {
+        setStaffListOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [staffListOpen]);
 
   const shiftMonth = (delta: number) => {
     const [year, month] = monthValue.split("-").map(Number);
@@ -785,73 +812,103 @@ export function AdminCalendar() {
         </Button>
       </div>
 
-      <div className="px-3 pb-3">
+      <div className="px-3 pb-3" ref={staffPickerRef}>
+        <div className="flex gap-1 pb-2">
+          {(["전체", ...POSITIONS] as const).map((p) => (
+            <Button
+              key={p}
+              type="button"
+              size="sm"
+              variant={staffFilter === p ? "default" : "outline"}
+              className="h-7 px-3 text-xs"
+              onClick={() => {
+                setStaffFilter(p);
+                setStaffListOpen(true);
+              }}
+            >
+              {p}
+            </Button>
+          ))}
+        </div>
         <div className="relative">
           <Input
             value={staffSearch}
-            onChange={(ev) => setStaffSearch(ev.target.value)}
+            onChange={(ev) => {
+              setStaffSearch(ev.target.value);
+              setStaffListOpen(true);
+            }}
+            onFocus={() => setStaffListOpen(true)}
             placeholder={
               viewStaff
                 ? `${viewStaff.staff_name}(${viewStaff.staff_position}) 화면 보는 중 — 다른 직원 검색`
                 : "직원 이름으로 검색해 개인 캘린더 보기"
             }
-            className="h-9 text-sm pr-9"
+            className="h-9 text-sm pr-16"
           />
+          <button
+            type="button"
+            onClick={() => setStaffListOpen((v) => !v)}
+            className="absolute right-1 top-1 h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
+            title={staffListOpen ? "목록 닫기" : "직원 목록 열기"}
+          >
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 transition-transform",
+                staffListOpen && "rotate-180"
+              )}
+            />
+          </button>
           {viewStaff && (
             <button
               type="button"
               onClick={() => {
                 setViewStaff(null);
                 setStaffSearch("");
+                setStaffListOpen(false);
               }}
-              className="absolute right-1 top-1 h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
+              className="absolute right-8 top-1 h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
               title="전체 보기로 복귀"
             >
               <X className="h-4 w-4" />
             </button>
           )}
         </div>
-        {staffSearch.trim() && (
+        {staffListOpen && (
           <div className="mt-1 max-h-56 overflow-auto rounded-md border bg-popover shadow-sm">
             {empLoading ? (
               <div className="px-3 py-2 text-xs text-muted-foreground">
                 직원 목록 로딩 중...
               </div>
+            ) : staffOptions.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                일치하는 직원이 없습니다.
+              </div>
             ) : (
-              (() => {
-                const q = staffSearch.trim().toLowerCase();
-                const matches = empList
-                  .filter((e) => e.staff_name.toLowerCase().includes(q))
-                  .slice(0, 12);
-                if (matches.length === 0) {
-                  return (
-                    <div className="px-3 py-2 text-xs text-muted-foreground">
-                      일치하는 직원이 없습니다.
-                    </div>
-                  );
-                }
-                return matches.map((e) => (
-                  <button
-                    key={e.staff_id}
-                    type="button"
-                    onClick={() => {
-                      setViewStaff({
-                        staff_id: e.staff_id,
-                        staff_name: e.staff_name,
-                        staff_position: e.staff_position,
-                      });
-                      setStaffSearch("");
-                    }}
-                    className="block w-full text-left px-3 py-2 text-sm hover:bg-accent"
-                  >
-                    {e.staff_name}
-                    <span className="text-xs text-muted-foreground">
-                      {" "}
-                      ({e.staff_position})
-                    </span>
-                  </button>
-                ));
-              })()
+              staffOptions.map((e) => (
+                <button
+                  key={e.staff_id}
+                  type="button"
+                  onClick={() => {
+                    setViewStaff({
+                      staff_id: e.staff_id,
+                      staff_name: e.staff_name,
+                      staff_position: e.staff_position,
+                    });
+                    setStaffSearch("");
+                    setStaffListOpen(false);
+                  }}
+                  className={cn(
+                    "block w-full text-left px-3 py-2 text-sm hover:bg-accent",
+                    viewStaff?.staff_id === e.staff_id && "bg-accent"
+                  )}
+                >
+                  {e.staff_name}
+                  <span className="text-xs text-muted-foreground">
+                    {" "}
+                    ({e.staff_position})
+                  </span>
+                </button>
+              ))
             )}
           </div>
         )}
