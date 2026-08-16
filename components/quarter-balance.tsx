@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { QuarterBalanceCalendarModal } from "@/components/quarter-balance-calendar-modal";
 import { Loader2, LogOut, Download } from "lucide-react";
 
 // 분기별 휴무 목표치: 운휴 + 휴 + 지휴 − 지근 = 24
@@ -39,7 +40,7 @@ const QUARTER_TARGET = 24;
 const POSITIONS = ["기관사", "차장"] as const;
 type Position = (typeof POSITIONS)[number];
 
-const QUARTERS = [
+export const QUARTERS = [
   { value: 1, label: "1분기 (1~3월)", startMonth: 1 },
   { value: 2, label: "2분기 (4~6월)", startMonth: 4 },
   { value: 3, label: "3분기 (7~9월)", startMonth: 7 },
@@ -98,6 +99,8 @@ export function QuarterBalance() {
   const [hasFetched, setHasFetched] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 캘린더 팝업으로 들여다볼 직원. null 이면 팝업이 닫힌 상태.
+  const [selectedStaff, setSelectedStaff] = useState<StaffRow | null>(null);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -412,6 +415,14 @@ export function QuarterBalance() {
         <span className="font-semibold text-amber-600 dark:text-amber-400">
           초과 {summary.excess}명
         </span>
+        {mismatched.length > 0 && (
+          <>
+            {" · "}
+            <span className="text-foreground">
+              행을 클릭하면 해당 직원의 근무 캘린더가 열립니다.
+            </span>
+          </>
+        )}
       </div>
 
       {error && (
@@ -456,10 +467,21 @@ export function QuarterBalance() {
                   return (
                     <TableRow
                       key={r.staff_id}
+                      role="button"
+                      tabIndex={0}
+                      title={`${r.staff_name} 근무 캘린더 열기`}
+                      onClick={() => setSelectedStaff(r)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedStaff(r);
+                        }
+                      }}
                       className={cn(
+                        "cursor-pointer",
                         isShort
-                          ? "bg-red-50 dark:bg-red-950/30"
-                          : "bg-amber-50 dark:bg-amber-950/30"
+                          ? "bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50"
+                          : "bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-950/50"
                       )}
                     >
                       <TableCell className="text-center text-sm whitespace-nowrap">
@@ -512,6 +534,14 @@ export function QuarterBalance() {
           </div>
         )}
       </div>
+
+      <QuarterBalanceCalendarModal
+        staff={selectedStaff}
+        year={year}
+        quarter={quarter}
+        onClose={() => setSelectedStaff(null)}
+        onChanged={fetchData}
+      />
     </div>
   );
 }

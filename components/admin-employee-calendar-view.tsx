@@ -46,6 +46,12 @@ interface AdminEmployeeCalendarViewProps {
     staff_position: string;
   };
   monthValue: string;
+  // 지근/지휴가 등록·삭제됐을 때 부모에게 알린다. 이 뷰를 감싼 화면(분기 휴무
+  // 검증 등)이 자기 집계를 다시 계산할 수 있도록 하기 위한 선택적 콜백.
+  onDataChanged?: () => void;
+  // 관리자 권한 안내 배너 표시 여부. 이미 "누구의 캘린더인지" 를 헤더에서
+  // 밝히는 모달 안에서는 중복이라 끌 수 있게 한다.
+  showAdminNotice?: boolean;
 }
 
 // 관리자가 특정 직원의 캘린더를 사용자 본인 시점으로 보고
@@ -54,6 +60,8 @@ interface AdminEmployeeCalendarViewProps {
 export function AdminEmployeeCalendarView({
   staff,
   monthValue,
+  onDataChanged,
+  showAdminNotice = true,
 }: AdminEmployeeCalendarViewProps) {
   const [regularMap, setRegularMap] = useState<Map<string, string>>(new Map());
   // 월 밖(전월 말일·익월 1일) 근무. 연휴 짝 판정에만 쓰고 집계·표시에는 쓰지 않는다.
@@ -315,11 +323,13 @@ export function AdminEmployeeCalendarView({
 
   return (
     <>
-      <p className="mx-2 mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-        관리자 권한으로 <b>{staff.staff_name}</b>({staff.staff_position}) 화면을
-        보고 있습니다. 등록·삭제 시 해당 직원의 신청이 변경됩니다. (신청 마감일
-        무시)
-      </p>
+      {showAdminNotice && (
+        <p className="mx-2 mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          관리자 권한으로 <b>{staff.staff_name}</b>({staff.staff_position})
+          화면을 보고 있습니다. 등록·삭제 시 해당 직원의 신청이 변경됩니다.
+          (신청 마감일 무시)
+        </p>
+      )}
 
       <div className="flex items-center justify-center gap-2 flex-wrap py-3 text-base font-bold">
         <span className="rounded px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
@@ -471,7 +481,10 @@ export function AdminEmployeeCalendarView({
         isFrozen={false}
         freezeDate={null}
         onClose={() => setSelectedDate(null)}
-        onChanged={fetchData}
+        onChanged={() => {
+          fetchData();
+          onDataChanged?.();
+        }}
       />
     </>
   );
