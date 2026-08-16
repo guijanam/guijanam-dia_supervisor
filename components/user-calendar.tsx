@@ -20,7 +20,6 @@ import {
   getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
-  getTodayMonthStr,
   getCalendarGrid,
   isSameMonth,
   getDayColorClass,
@@ -32,6 +31,7 @@ import {
   getTurnDisplay,
   isHueTurnOnDate,
 } from "@/lib/schedule-utils";
+import { useMonthState } from "@/lib/use-month-state";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -58,7 +58,7 @@ export interface DayEntry {
 export function UserCalendar() {
   const { employee, logout } = useAuth();
   const [view, setView] = useState<UserView>("calendar");
-  const [monthValue, setMonthValue] = useState(getTodayMonthStr());
+  const [monthValue, setMonthValue] = useMonthState("user-calendar");
   const [regularMap, setRegularMap] = useState<Map<string, string>>(new Map());
   // 월 밖(전월 말일·익월 1일) 근무. 연휴 짝 판정에만 쓰고 집계·표시에는 쓰지 않는다.
   const [regularContext, setRegularContext] = useState<Map<string, string>>(

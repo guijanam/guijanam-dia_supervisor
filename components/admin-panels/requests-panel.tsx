@@ -25,7 +25,6 @@ import {
   getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
-  getTodayMonthStr,
   getDayName,
   getDayExcelColor,
   getTurnColorClass,
@@ -33,6 +32,7 @@ import {
   padDateRange,
   getTurnDisplay,
 } from "@/lib/schedule-utils";
+import { useMonthState } from "@/lib/use-month-state";
 import { cn } from "@/lib/utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
@@ -114,7 +114,7 @@ export function RequestsPanel({
   onSettingsLoaded,
   registerRefresh,
 }: RequestsPanelProps) {
-  const [monthValue, setMonthValue] = useState(getTodayMonthStr());
+  const [monthValue, setMonthValue] = useMonthState("requests-panel");
   const [nameFilter, setNameFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState<
     "전체" | "기관사" | "차장"

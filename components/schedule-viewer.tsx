@@ -17,7 +17,6 @@ import {
   parseHolidayTurnRulesText,
 } from "@/lib/types";
 import {
-  getTodayMonthStr,
   generateDateRange,
   computeScheduleRange,
   computeInitialRange,
@@ -25,13 +24,14 @@ import {
   padDateRange,
   applyHolidayTurnRules,
 } from "@/lib/schedule-utils";
+import { useMonthState } from "@/lib/use-month-state";
 import { ScheduleControls } from "@/components/schedule-controls";
 import { ScheduleTable } from "@/components/schedule-table";
 import { BottomTabs } from "@/components/bottom-tabs";
 
 export function ScheduleViewer() {
   const [selectedTab, setSelectedTab] = useState<PositionTab>("기관사");
-  const [monthValue, setMonthValue] = useState(getTodayMonthStr());
+  const [monthValue, setMonthValue] = useMonthState("schedule-viewer");
   const [searchFilter, setSearchFilter] = useState("");
   const [allData, setAllData] = useState<ScheduleRecord[]>([]);
   const [dateRange, setDateRange] = useState<string[]>([]);

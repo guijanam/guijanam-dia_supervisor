@@ -23,7 +23,6 @@ import {
   getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
-  getTodayMonthStr,
   getCalendarGrid,
   isSameMonth,
   getDayColorClass,
@@ -36,6 +35,7 @@ import {
   getTurnExcelFill,
   isHueTurnOnDate,
 } from "@/lib/schedule-utils";
+import { useMonthState } from "@/lib/use-month-state";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -88,7 +88,7 @@ function countJigeun(entries: SpecialEntry[], pos: Position): number {
 
 export function AdminCalendar() {
   const { logout } = useAuth();
-  const [monthValue, setMonthValue] = useState(getTodayMonthStr());
+  const [monthValue, setMonthValue] = useMonthState("admin-calendar");
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialEntry[]>>(
     new Map()
   );
