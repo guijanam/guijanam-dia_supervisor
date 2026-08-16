@@ -43,6 +43,7 @@ interface Props {
   weekendHolidayTurns: string[];
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
+  officeName: string;
   onSaved: () => void;
 }
 
@@ -52,6 +53,7 @@ export function JigeunCapSettings({
   weekendHolidayTurns,
   jigeunTurns,
   holidayTurnRules,
+  officeName,
   onSaved,
 }: Props) {
   const { isAdmin, employee } = useAuth();
@@ -73,6 +75,7 @@ export function JigeunCapSettings({
   const [draftHolidayRulesText, setDraftHolidayRulesText] = useState<string>(
     formatHolidayTurnRulesText(holidayTurnRules)
   );
+  const [draftOfficeName, setDraftOfficeName] = useState<string>(officeName);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,6 +88,7 @@ export function JigeunCapSettings({
       setDraftDayTurnsText(formatTurnsText(jigeunTurns.dayTurns));
       setDraftNightTurnsText(formatTurnsText(jigeunTurns.nightTurns));
       setDraftHolidayRulesText(formatHolidayTurnRulesText(holidayTurnRules));
+      setDraftOfficeName(officeName);
       setError(null);
     }
   }, [
@@ -94,6 +98,7 @@ export function JigeunCapSettings({
     weekendHolidayTurns,
     jigeunTurns,
     holidayTurnRules,
+    officeName,
   ]);
 
   if (!isAdmin || !employee) return null;
@@ -147,6 +152,7 @@ export function JigeunCapSettings({
           holiday_turn_rules: formatHolidayTurnRulesText(
             normalizedHolidayRules
           ),
+          office_name: draftOfficeName.trim(),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -185,6 +191,25 @@ export function JigeunCapSettings({
           {error && (
             <p className="text-destructive text-sm font-medium">{error}</p>
           )}
+
+          <div className="flex flex-col gap-1 pb-2 border-b">
+            <div className="flex items-start gap-3">
+              <label className="w-16 text-sm font-medium pt-2">승무소</label>
+              <Input
+                type="text"
+                className="h-9"
+                placeholder="예: 동대문승무소"
+                value={draftOfficeName}
+                disabled={isSaving}
+                onChange={(e) => setDraftOfficeName(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground pl-[4.75rem]">
+              교번 관리에서 이 승무소 교번만 보이도록 거르는 이름 접두사입니다.
+              한 DB 에 여러 승무소 교번이 섞여 있을 때만 입력하세요.{" "}
+              <b>비우면 전체 교번이 보입니다.</b>
+            </p>
+          </div>
 
           <div className="flex flex-col gap-3">
             {FIELDS.map((f) => (

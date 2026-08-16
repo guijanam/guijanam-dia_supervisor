@@ -57,20 +57,41 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
 ## ⚠️ 선행 의존성 (가장 중요)
 
 `supabase/migrations.sql` 은 **빈 DB를 처음부터 만드는 스크립트가 아니다.**
-이 파일은 이미 존재하는 다음 두 가지 **위에** 컬럼/테이블을 덧붙인다.
+이 파일은 이미 존재하는 다음 것들 **위에** 컬럼/테이블을 덧붙인다.
+아래 4가지는 이 레포의 SQL이 만들지 않으므로 **새 프로젝트에 직접 구축해야
+한다.**
 
 1. **`coworker_list` 테이블** — 직원 마스터.
    `staff_id`, `staff_name`, `staff_position`, `employee_number`,
-   `phone_number`, `office_name`(소속 승무소명) 등을 가진다.
+   `phone_number`, `pattern_id`, `reference_date`, `reference_shift`,
+   `office_name`(소속 승무소명) 등을 가진다.
 2. **`get_schedule_by_range(p_start_date, p_end_date)` RPC** 와 그 RPC가
-   읽는 **원천 정규 근무순서 데이터**. (이 레포의 SQL이 만들지 않음 —
-   기존 시스템에서 이미 제공되던 것)
+   읽는 **원천 정규 근무순서 데이터**, 그리고 **`work_patterns` 테이블**.
+   (기존 시스템에서 이미 제공되던 것)
+3. **`holidays` 테이블** — 공휴일 목록. `locdate`(YYYY-MM-DD 문자열),
+   `is_holiday`('Y'/'N') 컬럼을 쓴다. 앱의 7개 화면이 조회한다
+   (사용자/관리자 달력, 분기밸런스, 근무표 뷰어, 직원별 달력, 탈락자
+   날짜변경, 신청목록).
+   ⚠️ **없으면 에러가 나지 않고 조용히 공휴일이 0건으로 처리된다** —
+   달력에 공휴일 색이 안 들어가고, 공휴일 지근 정원 집계와 연휴 근무번호
+   치환이 전부 틀리게 동작한다. 가장 발견하기 어려운 실수다.
+4. **`maintenance` 테이블** — 근무표 뷰어(`schedule-viewer.tsx`)에서 조회한다.
 
-새 승무소용 Supabase 프로젝트를 만들 때는 **이 두 가지를 먼저 그 프로젝트에
+새 승무소용 Supabase 프로젝트를 만들 때는 **이것들을 먼저 그 프로젝트에
 구축한 뒤** `migrations.sql` 을 실행해야 한다. 이 선행 데이터(직원 명단,
-근무순서, RPC 정의)를 어디서 가져오는지는 기존 시스템 담당자에게 확인해야
-하며, 이 문서 범위 밖이다. 아래 절차의 **3단계**에서 이 부분을 반드시
-처리한다.
+근무순서, RPC 정의, 공휴일)를 어디서 가져오는지는 기존 시스템 담당자에게
+확인해야 하며, 이 문서 범위 밖이다. 아래 절차의 **2단계**에서 이 부분을
+반드시 처리한다.
+
+> 동대문 프로젝트에서 선행 객체들의 정의를 그대로 뜨려면 SQL Editor 에서:
+> ```sql
+> -- 테이블 목록 확인
+> select table_name from information_schema.tables
+>  where table_schema = 'public' order by 1;
+> -- RPC 정의 추출
+> select pg_get_functiondef(oid) from pg_proc
+>  where proname = 'get_schedule_by_range';
+> ```
 
 ---
 
@@ -90,8 +111,9 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
 ### 2단계 — 선행 의존성 구축 (코어 데이터/RPC)
 
 새 프로젝트에 아직 `coworker_list` 도, `get_schedule_by_range` RPC 도,
-근무순서 원천 데이터도 없다. 기존 동대문 시스템에서 이 코어를 어떻게
-공급했는지 확인하여 동일하게 새 프로젝트에 구축한다.
+근무순서 원천 데이터도, `holidays`/`maintenance` 도 없다. 기존 동대문
+시스템에서 이 코어를 어떻게 공급했는지 확인하여 동일하게 새 프로젝트에
+구축한다(위 "선행 의존성" 4가지 전부).
 
 - 새 프로젝트의 `coworker_list` 에는 **그 승무소(신답) 직원만** 넣는다.
 - 직원 행의 `office_name` 은 "신답승무소"로 일관되게 채운다
@@ -102,9 +124,16 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
   `coworker_list.staff_id` 와 동일 체계여야 한다(앱이 staff_id 로
   근무·신청을 연결하므로).
 
-> 검증: SQL Editor 에서
+> 검증 1: SQL Editor 에서
 > `select count(*), min(office_name), max(office_name) from coworker_list;`
 > 실행 → 신답 직원 수가 맞고 office_name 이 전부 "신답승무소" 인지 확인.
+>
+> 검증 2: 공휴일이 실제로 들어갔는지 확인(빠뜨리기 쉬움).
+> ```sql
+> select count(*) from public.holidays
+>  where is_holiday = 'Y' and locdate >= '2026-01-01';
+> ```
+> 0 이면 달력 공휴일 표시·공휴일 정원 집계가 조용히 틀린다.
 
 ### 3단계 — 이 레포의 마이그레이션 실행
 
@@ -132,6 +161,8 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
 | 16 | 연휴 근무번호 짝 치환(`holiday_turn_rules`) | 표시 전용 |
 | 17 | `work_patterns`(교번) 관리자 CRUD | RLS 주의 — 블록 전체를 한 번에 실행 |
 | 18 | 주간/야간 지정근무(`jigeun_day_turns`/`jigeun_night_turns`) | 섹션 15 를 대체 |
+| 19 | `special_schedules` → `coworker_list` 외래키 | 실행 전 고아 레코드 확인 |
+| 20 | 승무소명(`office_name`) | 교번 목록 접두사 필터. 보통 비워둔다 |
 
 주의:
 - **EXPLAIN/Analyze 모드를 끄고** 일반 Run 으로 실행한다. 여러 SQL
@@ -142,20 +173,34 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
 - 섹션 9 까지 끝나면
   `select * from public.app_settings;` 로 `id=1`, 정원 `4/2/4/4`
   한 행이 있는지 확인한다(추첨/정원 기능 동작 전제).
+- 섹션 20 의 `office_name` 은 **한 DB 에 여러 승무소 교번이 섞여 있을
+  때만** 채운다. 이 배포 방식(승무소 = 프로젝트 1개)에서는 섞일 일이
+  없으므로 **기본값인 빈 문자열 그대로 두면 된다.** 섞여 있는지는:
+  ```sql
+  select split_part(pattern_name, '(', 1) as prefix, count(*)
+    from public.work_patterns group by 1 order by 2 desc;
+  ```
+  접두사가 여러 개 나오면 그 승무소명으로 `office_name` 을 채운다.
 
 ### 4단계 — 정원/관리자 초기 설정
 
 1. 섹션 3 에서 신답 관리자 계정을 `role='admin'` 으로 지정했는지 확인.
 2. 관리자로 로그인하면 헤더에 **설정** 버튼이 보인다. 신답승무소에 맞는
    평일/토/일/공휴일 지근 정원을 설정한다(동대문과 독립).
-3. 같은 **설정** 다이얼로그에서 승무소별 근무번호를 입력한다:
+3. 설정 맨 위 **승무소** 칸은 교번 관리에서 이 승무소 교번만 보이도록
+   거르는 **이름 접두사**다. 승무소별로 DB 가 분리된 이 구조에서는
+   **비워두는 것이 정상**이며, 비우면 그 프로젝트의 전체 교번이 보인다.
+   한 DB 에 여러 승무소 교번이 섞여 있을 때만 채운다.
+   ⚠️ 값을 채웠는데 실제 교번 이름이 그 접두사로 시작하지 않으면
+   **교번 관리 화면이 빈 목록이 되고 새 교번 저장도 거부된다.**
+4. 같은 **설정** 다이얼로그에서 승무소별 근무번호를 입력한다:
    - **운휴 번호** — 주말/공휴일에 운휴로 집계할 번호.
    - **주간 지정근무** / **야간 지정근무** — 요일과 무관하게 지근으로
      표시할 번호. 각각 달력·엑셀에 `지(주)` / `지(야)` 로 표시된다.
      같은 번호를 양쪽에 넣으면 저장이 거부된다. 두 칸 모두 기본값이
      비어 있고, **입력 전까지는 지근 표시가 나오지 않는다.**
    - **운휴대기** — 연휴 이틀 치환 규칙(표시 전용).
-4. 직원들이 최초 로그인 시 개인 PIN 을 등록한다(섹션 7 기능).
+5. 직원들이 최초 로그인 시 개인 PIN 을 등록한다(섹션 7 기능).
 
 ### 5단계 — 새 배포 환경 만들기 (Vercel 기준)
 
@@ -166,6 +211,8 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
 
 1. Vercel 에서 **새 Project** 를 만들고 **같은 git 레포**
    (`guijanam-dia_supervisor`)를 연결한다.
+   - Framework Preset(Next.js)·Root Directory·빌드 명령은 **전부 기본값**
+     그대로 둔다. 이 레포는 `vercel.json` 이 없고 표준 Next.js 구조다.
 2. 같은 production 브랜치(`main`)를 사용한다 → 코드는 1벌 그대로.
 3. 그 Vercel 프로젝트의 **Environment Variables** 에 신답 Supabase 값을
    넣는다:
@@ -173,9 +220,15 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
    NEXT_PUBLIC_SUPABASE_URL      = https://<신답-project-ref>.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY = <신답 anon public key>
    ```
+   ⚠️ **Production / Preview / Development 세 환경 모두에 체크**해서
+   넣는다. Preview 에 빠뜨리면 프리뷰 배포가 다른 승무소 DB 를 보거나
+   (값이 비어) 흰 화면이 된다. `NEXT_PUBLIC_` 접두사가 붙은 값은
+   **빌드 시점에 번들에 박히므로**, 나중에 값을 바꾸면 **재배포**해야
+   반영된다(Vercel → Deployments → Redeploy).
 4. 도메인을 승무소가 구분되게 둔다(예: `dia-sindap.vercel.app` 또는
    커스텀 도메인 `sindap.example.com`).
 5. 동대문 Vercel 프로젝트는 그대로 동대문 Supabase 값을 유지한다.
+   → 이 단계에서 동대문 프로젝트는 **전혀 건드리지 않는다.**
 
 결과: 두 Vercel 프로젝트가 **같은 코드**를 빌드하지만 서로 다른 Supabase
 에 연결된다. `main` 에 코드 푸시 → 두 프로젝트 모두 자동 재배포(동일 코드).
@@ -195,6 +248,13 @@ Preview/Production 환경별 또는 별도 도메인에 다른 env 를 거는 �
 - [ ] 신답 관리자로 로그인 시 통합 관리/캘린더가 신답 데이터만 다룬다.
 - [ ] **정원** 설정이 신답 값으로 동작(동대문과 다르게 설정해 교차 확인).
 - [ ] 정원 초과 셀 강조·추첨·탈락자 날짜 변경이 정상 동작.
+- [ ] **교번 관리** 화면에 신답 교번이 보인다(빈 목록이 아니다).
+      비어 있으면 설정의 **승무소** 접두사와 실제 교번 이름이 어긋난 것이다.
+- [ ] 교번 **새로 만들기·이름 변경**이 저장된다.
+- [ ] **공휴일**이 달력에 색으로 표시되고, 공휴일 지근 정원이 공휴일
+      값으로 집계된다(→ `holidays` 테이블이 제대로 들어갔다는 신호).
+- [ ] 근무순서(근무표) 화면에 각 직원의 근무번호가 나온다
+      (→ `get_schedule_by_range` RPC 와 근무순서 데이터 연결 확인).
 - [ ] 동대문 배포 URL 에서는 신답 데이터가 전혀 안 보인다(역방향 확인).
 
 ---
@@ -216,6 +276,24 @@ Preview/Production 환경별 또는 별도 도메인에 다른 env 를 거는 �
 - [ ] 신답 Supabase 프로젝트 SQL Editor 에서 실행
 - [ ] (추가 승무소 있으면) 각 프로젝트에서 실행
 - [ ] 각 배포 URL 에서 기능 동작 확인
+
+### ⚠️ 직책명이 "기관사/차장" 과 다른 승무소를 추가할 때
+직책 목록 `["기관사", "차장"]` 이 **8개 파일에 하드코딩**되어 있고, 그중
+일부는 DB 조회 필터(`.in("staff_position", …)`)로 쓰인다. 따라서 직책명이
+다른 승무소를 붙이면 **에러 없이 결과가 빈 값으로 나온다.**
+
+해당 파일: [lib/types.ts](../lib/types.ts) (`PositionTab`),
+[quarter-balance.tsx](../components/quarter-balance.tsx),
+[admin-calendar.tsx](../components/admin-calendar.tsx),
+[requests-panel.tsx](../components/admin-panels/requests-panel.tsx),
+[pin-reset-panel.tsx](../components/admin-panels/pin-reset-panel.tsx),
+[reference-edit-panel.tsx](../components/admin-panels/reference-edit-panel.tsx),
+[bottom-tabs.tsx](../components/bottom-tabs.tsx),
+[schedule-viewer.tsx](../components/schedule-viewer.tsx)
+
+직책명이 모든 승무소에서 동일하면 손댈 필요가 없다. 다른 승무소가
+생기면 이 값들을 `app_settings` 로 빼는 작업이 선행되어야 한다
+(승무소명 `office_name` 을 뺀 것과 같은 방식).
 
 ### 직원의 승무소 이동(전근)
 물리 분리 구조라 자동 이관이 안 된다. 동대문→신답 전근 시:
@@ -246,12 +324,21 @@ RLS) 로의 구조 전환을 별도 설계해야 한다.
 새 승무소 추가 = **코드는 그대로 두고**:
 
 1. 새 Supabase 프로젝트 생성
-2. 그 프로젝트에 코어(coworker_list + 근무 RPC/데이터, office_name 채움) 구축
-3. `supabase/migrations.sql` 섹션 1~9 순서대로 실행(섹션 2·3 은 그
-   승무소 실제 값으로)
-4. 정원·관리자 설정
+2. 그 프로젝트에 **선행 4종** 구축 — `coworker_list`(office_name 채움),
+   `get_schedule_by_range` RPC + 근무순서 데이터 + `work_patterns`,
+   **`holidays`**, `maintenance`
+3. `supabase/migrations.sql` 섹션 **1~20 전부** 위에서부터 순서대로 실행
+   (섹션 2·3 은 그 승무소 실제 값으로, 섹션 20 의 `office_name` 은 보통
+   비워둠)
+4. 정원·관리자·승무소별 근무번호 설정
 5. 같은 git 레포로 **Vercel 새 프로젝트** 만들고 그 승무소 Supabase
-   env 만 다르게 지정 + 도메인 분리
-6. 배포 URL 에서 격리·기능 검증
+   env 2개만 다르게 지정(3개 환경 전부) + 도메인 분리
+6. 배포 URL 에서 격리·기능 검증(특히 교번 목록·공휴일 표시)
 
 코드 수정은 영원히 1곳에서만. 마이그레이션은 승무소 프로젝트마다 각각.
+
+**가장 흔한 실수 3가지**
+1. `holidays` 를 안 넣음 → 공휴일 색·정원 집계가 조용히 틀림
+2. Vercel env 를 Production 에만 넣음 → 프리뷰 배포가 깨짐
+3. 설정의 **승무소** 접두사를 실제 교번 이름과 다르게 채움 →
+   교번 관리가 빈 화면 (비워두면 안전)

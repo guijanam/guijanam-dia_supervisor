@@ -12,6 +12,7 @@ import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
+  DEFAULT_OFFICE_NAME,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -95,6 +96,7 @@ export function AdminDashboard() {
   const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
     DEFAULT_HOLIDAY_TURN_RULES
   );
+  const [officeName, setOfficeName] = useState<string>(DEFAULT_OFFICE_NAME);
   // RequestsPanel 의 재조회 함수 — JigeunCapSettings 저장 후 호출
   const requestsRefreshRef = useRef<() => void>(() => {});
 
@@ -132,6 +134,7 @@ export function AdminDashboard() {
             weekendHolidayTurns={weekendHolidayTurns}
             jigeunTurns={jigeunTurns}
             holidayTurnRules={holidayTurnRules}
+            officeName={officeName}
             onSaved={() => requestsRefreshRef.current()}
           />
           <ThemeToggle />
@@ -203,6 +206,7 @@ export function AdminDashboard() {
                 setWeekendHolidayTurns(s.weekendHolidayTurns);
                 setJigeunTurns(s.jigeunTurns);
                 setHolidayTurnRules(s.holidayTurnRules);
+                setOfficeName(s.officeName);
               }}
               registerRefresh={(fn) => {
                 requestsRefreshRef.current = fn;

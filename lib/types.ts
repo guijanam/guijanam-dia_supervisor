@@ -69,13 +69,21 @@ export const DEFAULT_JIGEUN_CAPS: JigeunCaps = {
 // weekendHolidayTurns 는 주말/공휴일에 운휴로 집계되는 근무번호 목록(승무소별 상이).
 // jigeunTurns 는 요일/공휴일과 무관하게 지근으로 표시되는 주간/야간 근무번호 목록.
 // holidayTurnRules 는 연속 이틀이 모두 휴일일 때 표시만 바꾸는 근무번호 짝 규칙.
+// officeName 은 이 배포가 담당하는 승무소명(교번 목록 접두사 필터).
 export interface AppSettings {
   caps: JigeunCaps;
   requestFreezeDate: string | null;
   weekendHolidayTurns: string[];
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
+  officeName: string;
 }
+
+// 승무소명. 교번(work_patterns) 이름의 접두사로 쓰여 이 승무소 교번만
+// 목록에 보이게 거른다. 빈 문자열이면 필터를 걸지 않고 전체를 보여준다 —
+// 승무소별 Supabase 프로젝트가 분리되어 한 DB 에 한 승무소 교번만 있는
+// 정상 구조에서는 비워두는 것이 맞다(migrations.sql 섹션 20 참고).
+export const DEFAULT_OFFICE_NAME = "";
 
 export const DEFAULT_WEEKEND_HOLIDAY_TURNS: string[] = [
   "31",

@@ -3,13 +3,17 @@
 ## 셋업
 
 1. 의존성 설치: `npm install`
-2. 환경변수: `.env.example` 를 `.env.local` 로 복사 후 Supabase 값 입력
+2. 환경변수: `cp .env.example .env.local` 후 Supabase 값 입력
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 3. DB: `supabase/migrations.sql` 을 Supabase SQL Editor 에서 실행
    - 기존 `coworker_list`(직원 마스터) 에 `role` 컬럼 추가
    - `special_schedules` 테이블 + RLS 생성 (`staff_id` 로 연결)
    - `coworker_list.employee_number` 가 비어 있으면 사번 데이터 입력
 4. 관리자 지정: `update coworker_list set role='admin' where staff_name='홍길동';`
+
+> **새 승무소에 이 서비스를 추가하려면** — 코드는 그대로 두고 Supabase
+> 프로젝트와 Vercel 배포만 따로 만든다.
+> 절차: [docs/multi-depot-deployment.md](docs/multi-depot-deployment.md)
 
 ## 기능
 

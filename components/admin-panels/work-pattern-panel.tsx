@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { WorkPattern } from "@/lib/types";
+import { DEFAULT_OFFICE_NAME } from "@/lib/types";
 import {
   type ElementOp,
   type PatternAnchor,
@@ -43,10 +44,14 @@ interface AnchorRow extends PatternAnchor {
 
 const MAX_NAMES = 10;
 
-// 이 배포본은 동대문승무소 전용이라 해당 승무소 교번만 다룬다.
-// 다른 승무소 교번(같은 DB 에 함께 있음)을 실수로 편집하면 그 승무소
-// 직원들의 근무표가 밀리므로, 표시가 아니라 조회 단계에서 걸러낸다.
-const OFFICE_PREFIX = "동대문승무소";
+// 교번 목록을 거르는 승무소명 접두사는 app_settings.office_name 에서 읽는다
+// (예전에는 '동대문승무소' 가 여기 하드코딩되어 있어 다른 승무소 배포에서
+//  목록이 조용히 비었다 — migrations.sql 섹션 20 참고).
+//
+// 한 DB 에 여러 승무소 교번이 섞여 있으면 남의 교번을 실수로 편집했을 때
+// 그 승무소 직원 전원의 근무표가 밀리므로, 표시가 아니라 조회 단계에서
+// 걸러낸다. 승무소별 Supabase 프로젝트가 분리된 정상 구조에서는 섞일 일이
+// 없으므로 office_name 을 비워두면 필터 없이 전체가 보인다.
 
 // 앵커 소실 경고 문구: 이름 10명까지 + 외 N명
 function formatNames(names: string[]): string {
@@ -56,6 +61,8 @@ function formatNames(names: string[]): string {
 
 export function WorkPatternPanel() {
   const [patterns, setPatterns] = useState<PatternRow[]>([]);
+  // app_settings.office_name. 빈 문자열이면 접두사 필터·검증을 적용하지 않는다.
+  const [officePrefix, setOfficePrefix] = useState<string>(DEFAULT_OFFICE_NAME);
   const [listLoading, setListLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [usedFilter, setUsedFilter] = useState<"전체" | "사용중" | "미사용">(
@@ -85,16 +92,31 @@ export function WorkPatternPanel() {
 
   const selected = patterns.find((p) => p.id === selectedId) ?? null;
 
-  // 교번 목록 + 교번별 사용 직원 수.
+  // 교번 목록 + 교번별 사용 직원 수 + 승무소명.
   // coworker_list 전체(약 284행)를 한 번 읽어 클라이언트에서 집계한다.
   // 교번마다 count 를 왕복하는 것보다 싸고 새 RPC/뷰가 필요 없다.
+  //
+  // 접두사를 먼저 읽어야 목록 조회 필터를 정할 수 있으므로 설정 조회만
+  // 선행시키고, 나머지 둘은 종전대로 병렬로 받는다(왕복 1회 추가).
   const loadPatterns = useCallback(async () => {
+    const setRes = await supabase
+      .from("app_settings")
+      .select("office_name")
+      .eq("id", 1)
+      .maybeSingle();
+    if (setRes.error) throw setRes.error;
+    const prefix =
+      ((setRes.data as { office_name: string | null } | null)?.office_name ??
+        DEFAULT_OFFICE_NAME).trim();
+
+    // 접두사가 비어 있으면 필터를 걸지 않는다(한 DB = 한 승무소인 경우).
+    let patQuery = supabase
+      .from("work_patterns")
+      .select("id, pattern_name, shift_types, created_at");
+    if (prefix) patQuery = patQuery.like("pattern_name", `${prefix}%`);
+
     const [patRes, cwRes] = await Promise.all([
-      supabase
-        .from("work_patterns")
-        .select("id, pattern_name, shift_types, created_at")
-        .like("pattern_name", `${OFFICE_PREFIX}%`)
-        .order("pattern_name", { ascending: true }),
+      patQuery.order("pattern_name", { ascending: true }),
       supabase.from("coworker_list").select("pattern_id"),
     ]);
     if (patRes.error) throw patRes.error;
@@ -105,11 +127,12 @@ export function WorkPatternPanel() {
       if (!row.pattern_id) continue;
       counts.set(row.pattern_id, (counts.get(row.pattern_id) ?? 0) + 1);
     }
-    return ((patRes.data ?? []) as WorkPattern[]).map<PatternRow>((p) => ({
+    const rows = ((patRes.data ?? []) as WorkPattern[]).map<PatternRow>((p) => ({
       ...p,
       shift_types: p.shift_types ?? [],
       userCount: counts.get(p.id) ?? 0,
     }));
+    return { rows, prefix };
   }, []);
 
   useEffect(() => {
@@ -117,8 +140,11 @@ export function WorkPatternPanel() {
     (async () => {
       setListLoading(true);
       try {
-        const rows = await loadPatterns();
-        if (active) setPatterns(rows);
+        const { rows, prefix } = await loadPatterns();
+        if (active) {
+          setPatterns(rows);
+          setOfficePrefix(prefix);
+        }
       } catch (err) {
         if (active)
           setError(err instanceof Error ? err.message : "교번 목록 로딩 실패");
@@ -297,10 +323,11 @@ export function WorkPatternPanel() {
   const nameError = (() => {
     if (!nameDialog) return null;
     if (!nameTrimmed) return "교번 이름을 입력하세요.";
-    // 목록은 동대문승무소 교번만 보여준다. 접두사가 없으면 저장 직후
-    // 목록에서 사라져 다시 편집할 수 없게 되므로 미리 막는다.
-    if (!nameTrimmed.startsWith(OFFICE_PREFIX))
-      return `교번 이름은 "${OFFICE_PREFIX}" 으로 시작해야 합니다.`;
+    // 접두사 필터가 걸려 있으면, 접두사 없는 이름은 저장 직후 목록에서
+    // 사라져 다시 편집할 수 없게 되므로 미리 막는다.
+    // 필터가 없으면(승무소명 미설정) 이 제약도 걸지 않는다.
+    if (officePrefix && !nameTrimmed.startsWith(officePrefix))
+      return `교번 이름은 "${officePrefix}" 으로 시작해야 합니다.`;
     const dup = patterns.some(
       (p) =>
         p.pattern_name.trim().toLowerCase() === nameTrimmed.toLowerCase() &&
@@ -406,7 +433,8 @@ export function WorkPatternPanel() {
       <div>
         <h2 className="text-base font-bold">교번 관리</h2>
         <p className="text-sm text-muted-foreground">
-          {OFFICE_PREFIX} 기관사·차장의 근무순서(교번)를 관리합니다. 근무순서는{" "}
+          {officePrefix ? `${officePrefix} ` : ""}기관사·차장의 근무순서(교번)를
+          관리합니다. 근무순서는{" "}
           <b>순서 자체가 근무표를 만듭니다</b> — 칸을 삽입·삭제·이동하면 이 교번을
           쓰는 직원 전원의 근무표가 이후로 한 칸씩 밀립니다. 되돌리기가 없으니
           위험한 편집 전에는 &quot;현재 순서 복사&quot;로 백업하세요.
@@ -481,7 +509,10 @@ export function WorkPatternPanel() {
           size="sm"
           className="h-9 gap-1"
           onClick={() =>
-            setNameDialog({ mode: "create", value: `${OFFICE_PREFIX}(` })
+            setNameDialog({
+              mode: "create",
+              value: officePrefix ? `${officePrefix}(` : "",
+            })
           }
         >
           <Plus className="h-4 w-4" />새 교번
@@ -823,7 +854,7 @@ export function WorkPatternPanel() {
                 autoFocus
                 value={nameDialog?.value ?? ""}
                 disabled={busy}
-                placeholder="예) 동대문승무소(기관사)"
+                placeholder={`예) ${officePrefix || "○○승무소"}(기관사)`}
                 onChange={(e) =>
                   setNameDialog((prev) =>
                     prev ? { ...prev, value: e.target.value } : prev

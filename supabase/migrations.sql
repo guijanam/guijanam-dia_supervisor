@@ -481,3 +481,38 @@ alter table public.special_schedules
   add constraint special_schedules_staff_fk
   foreign key (staff_id) references public.coworker_list (staff_id)
   on delete cascade;
+
+-- ============================================================
+-- 20) 승무소명(office_name) ------------------------------------
+--  [배경]
+--  work-pattern-panel.tsx 에 OFFICE_PREFIX = '동대문승무소' 가 하드코딩되어
+--  있었다. 교번 목록을 이 접두사로 조회 필터링하고 저장 시 접두사를 강제하는
+--  용도였다. 다른 승무소용 배포에서는 이 상수 때문에 교번 목록이 항상 빈
+--  화면이 되고 교번 생성/이름변경이 전부 거부된다 — 에러가 안 나고 조용히
+--  비어서 원인 파악이 특히 어렵다.
+--
+--  승무소마다 다른 다른 운영값(지근 정원·운휴 번호·지정근무 번호 등)이 이미
+--  전부 app_settings 에 모여 있으므로 승무소명도 같은 자리에 둔다.
+--  (환경변수로 빼지 않은 이유: 배포마다 관리할 env 가 늘어나고, 값이 바뀔 때
+--   재배포가 필요해진다. 설정 화면에서 고칠 수 있는 편이 운영에 맞다.)
+--
+--  [빈 값의 의미]
+--  '' 이면 접두사 필터를 걸지 않고 work_patterns 전체를 보여준다.
+--  승무소별 Supabase 프로젝트가 물리적으로 분리되어 한 DB 에 한 승무소
+--  교번만 있는 정상 구조에서는 비워둬도 문제가 없다. 한 DB 에 여러 승무소
+--  교번이 섞여 있는 경우에만 값을 채운다.
+--
+--  [실행 전 확인]
+--  이 DB 에 타 승무소 교번이 섞여 있는지 먼저 본다:
+--      select split_part(pattern_name, '(', 1) as prefix, count(*)
+--        from public.work_patterns group by 1 order by 2 desc;
+--  동대문 외 접두사가 나오면 아래 update 를 반드시 실행한다.
+--  동대문 것만 나오면 update 는 건너뛰고 비워둬도 된다.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists office_name text not null default '';
+
+-- 기존 동대문 프로젝트에서 종전 동작(동대문 교번만 표시)을 유지하려면 실행.
+-- 새 승무소 프로젝트에서는 그 승무소명으로 바꿔 실행하거나, 한 DB 에 한
+-- 승무소 교번만 있다면 실행하지 않는다.
+-- update public.app_settings set office_name = '동대문승무소' where id = 1;

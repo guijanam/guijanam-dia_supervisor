@@ -18,6 +18,7 @@ import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
+  DEFAULT_OFFICE_NAME,
   parseTurnsText,
   parseHolidayTurnRulesText,
   getJigeunKind,
@@ -99,6 +100,7 @@ export interface SettingsSnapshot {
   weekendHolidayTurns: string[];
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
+  officeName: string;
 }
 
 interface RequestsPanelProps {
@@ -178,7 +180,7 @@ export function RequestsPanel({
         fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("app_settings")
-          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
+          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, office_name")
           .eq("id", 1)
           .maybeSingle(),
         supabase
@@ -201,6 +203,7 @@ export function RequestsPanel({
         jigeun_day_turns: string | null;
         jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
+        office_name: string | null;
       } | null;
       const caps = s
         ? {
@@ -232,6 +235,7 @@ export function RequestsPanel({
         weekendHolidayTurns: turns,
         jigeunTurns: loadedJigeunTurns,
         holidayTurnRules: holidayRules,
+        officeName: s?.office_name ?? DEFAULT_OFFICE_NAME,
       });
 
       // 연휴 짝 치환 판정에 필요 — state 반영 전에 로컬 Set 으로 먼저 사용
