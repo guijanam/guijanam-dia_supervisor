@@ -83,7 +83,10 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
 확인해야 하며, 이 문서 범위 밖이다. 아래 절차의 **2단계**에서 이 부분을
 반드시 처리한다.
 
-> 동대문 프로젝트에서 선행 객체들의 정의를 그대로 뜨려면 SQL Editor 에서:
+> **이 4가지를 손으로 만들 필요는 없다.** 2단계에서 Supabase CLI 로
+> 동대문 구조를 통째로 복제하면 전부 함께 넘어간다.
+>
+> 개별 정의를 눈으로 확인하고 싶을 때만 SQL Editor 에서:
 > ```sql
 > -- 테이블 목록 확인
 > select table_name from information_schema.tables
@@ -108,32 +111,113 @@ Supabase 프로젝트와 배포 환경만 따로 두는** 방식으로 여러 �
 4. 동대문 프로젝트와 **완전히 별개**의 프로젝트여야 한다(같은 프로젝트
    안에서 분리하는 게 아니다).
 
-### 2단계 — 선행 의존성 구축 (코어 데이터/RPC)
+### 2단계 — 선행 의존성 구축 (Supabase CLI 로 구조 복제)
 
-새 프로젝트에 아직 `coworker_list` 도, `get_schedule_by_range` RPC 도,
-근무순서 원천 데이터도, `holidays`/`maintenance` 도 없다. 기존 동대문
-시스템에서 이 코어를 어떻게 공급했는지 확인하여 동일하게 새 프로젝트에
-구축한다(위 "선행 의존성" 4가지 전부).
+새 프로젝트에는 `coworker_list` 도, `get_schedule_by_range` RPC 도,
+근무순서 데이터도, `holidays`/`maintenance` 도 없다.
 
-- 새 프로젝트의 `coworker_list` 에는 **그 승무소(신답) 직원만** 넣는다.
-- 직원 행의 `office_name` 은 "신답승무소"로 일관되게 채운다
-  (현재 코드는 office_name 을 화면에 쓰지 않지만, 향후 식별·점검·데이터
-  검증에 쓰이므로 정확히 채워 둔다).
-- `get_schedule_by_range` RPC 와 그것이 읽는 근무순서 데이터도 신답
-  직원 기준으로 구축한다. RPC 가 반환하는 `staff_id` 는 같은 프로젝트의
-  `coworker_list.staff_id` 와 동일 체계여야 한다(앱이 staff_id 로
-  근무·신청을 연결하므로).
+이걸 손으로 만들지 않는다. **동대문 프로젝트의 구조를 CLI 로 통째로 떠서
+새 프로젝트에 붓는다.** 테이블·함수·인덱스·RLS 정책·제약조건이 한 번에
+넘어가므로 빠뜨릴 수가 없다(선행 의존성 4가지가 전부 포함된다).
 
-> 검증 1: SQL Editor 에서
-> `select count(*), min(office_name), max(office_name) from coworker_list;`
-> 실행 → 신답 직원 수가 맞고 office_name 이 전부 "신답승무소" 인지 확인.
->
-> 검증 2: 공휴일이 실제로 들어갔는지 확인(빠뜨리기 쉬움).
-> ```sql
-> select count(*) from public.holidays
->  where is_holiday = 'Y' and locdate >= '2026-01-01';
-> ```
-> 0 이면 달력 공휴일 표시·공휴일 정원 집계가 조용히 틀린다.
+#### ⚠️ 원칙: 구조는 복사하되, 데이터는 복사하지 않는다
+
+동대문 직원 행을 신답 직원 정보로 **덮어쓰면 안 된다.** `staff_id` 에
+다음이 전부 묶여 있어서, 덮어쓰면 남의 흔적을 그대로 물려받는다:
+
+| 딸려오는 것 | 덮어썼을 때 생기는 일 |
+|---|---|
+| `special_schedules` | 신답 직원이 동대문 사람의 지근/지휴 신청을 물려받음 |
+| `document_reads` / `document_votes` | 안 읽은 문서가 읽음 처리, 안 한 투표가 되어 있음 |
+| `pin_hash` | **동대문 직원의 PIN 으로 신답 직원 계정에 로그인 가능** |
+| `device_id` | 엉뚱한 기기가 VIP 로 인식됨 |
+
+특히 PIN 이 위험하다. `pin_hash` 는 `SHA-256("<staff_id>:<PIN>")` 이라
+**`staff_id` 가 같으면 옛 PIN 이 그대로 유효하다**([lib/pin.ts](../lib/pin.ts)).
+
+→ 그래서 **스키마만 뜨고(`--data-only` 없이), 직원 데이터는 새로 넣는다.**
+   `supabase db dump` 는 기본이 스키마만이라 자연스럽게 이렇게 된다.
+
+#### 2-1. 동대문에서 구조 뜨기
+
+```bash
+supabase login
+supabase link --project-ref <동대문-project-ref>
+
+# 스키마만 (테이블·함수·RLS·인덱스, 데이터 없음)
+supabase db dump -f schema.sql
+
+# 공휴일은 승무소 무관 공용이므로 데이터째 가져간다
+supabase db dump --data-only --table public.holidays -f holidays.sql
+```
+
+#### 2-2. 새 프로젝트에 붓기
+
+```bash
+supabase link --project-ref <신답-project-ref>
+psql "<신답 connection string>" -f schema.sql
+psql "<신답 connection string>" -f holidays.sql
+```
+
+connection string 은 신답 프로젝트 → Settings → Database → Connection
+string 에서 얻는다.
+
+이 시점에 `get_schedule_by_range` 함수, `holidays`(데이터 포함),
+`maintenance`, `work_patterns`, `coworker_list` 가 **구조만** 갖춰진다.
+
+#### 2-3. 신답 데이터 넣기
+
+1. **`work_patterns`** — 신답 교번만 넣는다.
+   동대문 DB 에 이미 여러 승무소 교번이 들어 있으므로(2026-08 기준 25개
+   중 동대문은 2개뿐), 동대문에서 신답 것만 골라 뜬다:
+   ```bash
+   # 동대문에 링크한 상태에서
+   psql "<동대문 connection string>" -At -c "
+     select format('insert into public.work_patterns (pattern_name, shift_types) values (%L,%L);',
+                   pattern_name, shift_types)
+       from public.work_patterns where pattern_name like '신답%';"
+   ```
+   나온 insert 문을 신답 프로젝트에서 실행한다.
+   > `id` 는 새로 발급되게 두고, 아래 `coworker_list.pattern_id` 는
+   > **새로 생긴 id** 를 참조해야 한다.
+
+2. **`coworker_list`** — 신답 직원만 넣는다. 넣을 때:
+   - `staff_id` 는 **새로 부여**한다(동대문 번호를 재사용하지 않는다).
+   - `pin_hash`, `device_id`, `role` 은 **비워 둔다.**
+     직원이 최초 로그인 때 PIN 을 새로 등록한다.
+   - `pattern_id` 는 위에서 만든 신답 교번의 id.
+   - `reference_date` / `reference_shift` 는 신답 기준값.
+   - `office_name` 은 "신답승무소"로 일관되게 채운다.
+
+3. **`app_settings`** — 비어 있어도 된다. 3단계 마이그레이션 섹션 9 의
+   `insert ... on conflict do nothing` 이 기본값 행(id=1)을 만든다.
+   정원·운휴번호는 4단계에서 화면으로 설정한다.
+
+#### 2-4. 검증
+
+```sql
+-- ① 신답 직원 근무가 실제로 계산되는지 (가장 중요)
+select count(*) from get_schedule_by_range('2026-09-01','2026-09-07');
+--   신답 직원 수 × 7 정도면 정상. 0 이면 pattern_id 나
+--   reference_date/reference_shift 연결이 잘못된 것이다.
+
+-- ② 남의 데이터가 안 넘어왔는지 (전부 0 이어야 한다)
+select count(*) from special_schedules;
+select count(*) from document_reads;
+select count(*) from coworker_list where pin_hash is not null;
+
+-- ③ 직원 수와 소속
+select count(*), min(office_name), max(office_name) from coworker_list;
+
+-- ④ 공휴일이 들어갔는지 (빠뜨리면 조용히 틀린다)
+select count(*) from public.holidays
+ where is_holiday = 'Y' and locdate >= '2026-01-01';
+--   0 이면 달력 공휴일 표시·공휴일 정원 집계가 전부 어긋난다.
+```
+
+> **매년 공휴일 갱신**: 이 구조의 유일한 반복 작업이다. 새해 공휴일이
+> 나오면 `holidays` 에 **승무소 프로젝트마다 각각** 넣어야 한다.
+> 2-1 의 `--data-only` 덤프를 다시 떠서 붓는 것이 가장 간단하다.
 
 ### 3단계 — 이 레포의 마이그레이션 실행
 
@@ -349,12 +433,15 @@ RLS 가 `using (true)` 인 현 구조에서는 **키를 아는 사람 = 그 승�
 새 승무소 추가 = **코드는 그대로 두고**:
 
 1. 새 Supabase 프로젝트 생성
-2. 그 프로젝트에 **선행 4종** 구축 — `coworker_list`(office_name 채움),
-   `get_schedule_by_range` RPC + 근무순서 데이터 + `work_patterns`,
-   **`holidays`**, `maintenance`
+2. **CLI 로 동대문 구조를 복제** — `supabase db dump -f schema.sql`
+   (스키마만) + `holidays` 는 `--data-only` 로 데이터째 → 새 프로젝트에
+   `psql -f` 로 붓기. 그다음 신답 교번·직원만 새로 넣는다.
+   ⚠️ **직원 행을 덮어쓰지 않는다** — `staff_id` 에 PIN·신청·열람기록이
+   묶여 있어 남의 흔적을 물려받는다. `pin_hash`/`device_id`/`role` 은
+   비워 두고 새로 등록하게 한다.
 3. `supabase/migrations.sql` 섹션 **1~20 전부** 위에서부터 순서대로 실행
-   (섹션 2·3 은 그 승무소 실제 값으로, 섹션 20 의 `office_name` 은 보통
-   비워둠)
+   (섹션 2·3 은 그 승무소 실제 값으로, 섹션 20 의 `office_name` 은 한 DB 에
+   여러 승무소 교번이 섞여 있을 때만 채움)
 4. 정원·관리자·승무소별 근무번호 설정
 5. 같은 git 레포로 **Vercel 새 프로젝트** 만들고 그 승무소 Supabase
    env 2개만 다르게 지정(3개 환경 전부) + 도메인 분리
@@ -362,8 +449,10 @@ RLS 가 `using (true)` 인 현 구조에서는 **키를 아는 사람 = 그 승�
 
 코드 수정은 영원히 1곳에서만. 마이그레이션은 승무소 프로젝트마다 각각.
 
-**가장 흔한 실수 3가지**
-1. `holidays` 를 안 넣음 → 공휴일 색·정원 집계가 조용히 틀림
-2. Vercel env 를 Production 에만 넣음 → 프리뷰 배포가 깨짐
-3. 설정의 **승무소** 접두사를 실제 교번 이름과 다르게 채움 →
+**가장 흔한 실수 4가지**
+1. 동대문 데이터를 통째로 복사한 뒤 직원 정보만 덮어씀 → 신답 직원이
+   동대문 사람의 PIN·신청·열람기록을 물려받는다. **구조만 복사한다.**
+2. `holidays` 를 안 넣음 → 공휴일 색·정원 집계가 조용히 틀림
+3. Vercel env 를 Production 에만 넣음 → 프리뷰 배포가 깨짐
+4. 설정의 **승무소** 접두사를 실제 교번 이름과 다르게 채움 →
    교번 관리가 빈 화면 (비워두면 안전)
