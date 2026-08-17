@@ -36,6 +36,7 @@ import {
   isHueTurnOnDate,
 } from "@/lib/schedule-utils";
 import { useMonthState } from "@/lib/use-month-state";
+import { lostWarningSuffix } from "@/lib/lottery-warning";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -403,7 +404,8 @@ export function AdminCalendar() {
   const deleteEntry = async (entry: SpecialEntry) => {
     if (
       !confirm(
-        `${entry.staff_name}님의 ${selectedDate} ${entry.record_type} 신청을 삭제할까요?`
+        `${entry.staff_name}님의 ${selectedDate} ${entry.record_type} 신청을 삭제할까요?` +
+          lostWarningSuffix(entry, "삭제하면")
       )
     )
       return;
@@ -502,6 +504,13 @@ export function AdminCalendar() {
   // 탈락자를 다른 날짜로 이동 (lottery 필드 초기화)
   const rescheduleLoser = async (entry: SpecialEntry, newDate: string) => {
     if (!newDate || newDate === selectedDate) return;
+    if (
+      !confirm(
+        `${entry.staff_name}님의 지근을 ${newDate}로 옮길까요?` +
+          lostWarningSuffix(entry, "옮기면")
+      )
+    )
+      return;
     setBusyId(entry.id);
     setError(null);
     try {

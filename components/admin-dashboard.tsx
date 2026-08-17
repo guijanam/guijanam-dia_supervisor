@@ -97,8 +97,16 @@ export function AdminDashboard() {
     DEFAULT_HOLIDAY_TURN_RULES
   );
   const [officeName, setOfficeName] = useState<string>(DEFAULT_OFFICE_NAME);
+  const [extraDeadline, setExtraDeadline] = useState<string | null>(null);
+  const [extraYear, setExtraYear] = useState<number | null>(null);
+  const [extraQuarter, setExtraQuarter] = useState<number | null>(null);
   // RequestsPanel 의 재조회 함수 — JigeunCapSettings 저장 후 호출
   const requestsRefreshRef = useRef<() => void>(() => {});
+
+  const today = format(new Date(), "yyyy-MM-dd");
+  // 추가 신청 기간은 1차 마감 다음날부터 추가 신청일까지다.
+  const extraActive =
+    !!extraDeadline && !!freezeDate && today > freezeDate && today <= extraDeadline;
 
   return (
     <div className="flex flex-col min-h-dvh">
@@ -126,6 +134,19 @@ export function AdminDashboard() {
                 }`
               : "마감 미설정"}
           </span>
+          {extraDeadline && (
+            <span
+              className={cn(
+                "text-xs rounded px-1.5 py-0.5 border",
+                extraActive
+                  ? "bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/50 dark:text-emerald-300"
+                  : "text-muted-foreground"
+              )}
+              title={`추가 신청 기간 — ${extraYear}년 ${extraQuarter}분기 합계가 24 가 아닌 직원만 신청 가능(삭제 불가)`}
+            >
+              {`추가 ${extraDeadline}${extraActive ? " (열림)" : ""}`}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <JigeunCapSettings
@@ -135,6 +156,9 @@ export function AdminDashboard() {
             jigeunTurns={jigeunTurns}
             holidayTurnRules={holidayTurnRules}
             officeName={officeName}
+            extraDeadline={extraDeadline}
+            extraYear={extraYear}
+            extraQuarter={extraQuarter}
             onSaved={() => requestsRefreshRef.current()}
           />
           <ThemeToggle />
@@ -207,6 +231,9 @@ export function AdminDashboard() {
                 setJigeunTurns(s.jigeunTurns);
                 setHolidayTurnRules(s.holidayTurnRules);
                 setOfficeName(s.officeName);
+                setExtraDeadline(s.extraRequestDeadline);
+                setExtraYear(s.extraRequestYear);
+                setExtraQuarter(s.extraRequestQuarter);
               }}
               registerRefresh={(fn) => {
                 requestsRefreshRef.current = fn;

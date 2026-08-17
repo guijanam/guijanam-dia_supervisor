@@ -516,3 +516,38 @@ alter table public.app_settings
 -- 새 승무소 프로젝트에서는 그 승무소명으로 바꿔 실행하거나, 한 DB 에 한
 -- 승무소 교번만 있다면 실행하지 않는다.
 -- update public.app_settings set office_name = '동대문승무소' where id = 1;
+
+-- ============================================================
+-- 21) 추가 신청일(2차 신청 기간) -------------------------------
+--  [배경]
+--  request_freeze_date 로 1차 마감한 뒤 관리자가 정원 초과일에 추첨을 돌리면,
+--  탈락자의 지근 신청은 삭제되거나 다른 날짜로 옮겨진다. 그 결과 마감 전까지
+--  분기 합계 24 를 맞춰 뒀던 직원이 다시 24 가 아니게 되는데, 이미 마감되어
+--  스스로 고칠 방법이 없다(관리자가 대신 등록해주는 수밖에 없었다).
+--
+--  [동작]
+--  1차 마감 이후 extra_request_deadline 까지, 지정한 분기에서 추첨에 떨어진
+--  (special_schedules.lottery_status = 'lost') 신청을 가진 직원에게만
+--  지근/지휴 신청을 다시 연다. 이 기간에는 등록·삭제가 모두 가능하다 —
+--  떨어진 자리를 다른 날짜로 다시 잡으려면 삭제도 필요하기 때문이다.
+--
+--  [운영 주의 — 탈락 표시를 지우지 말 것]
+--  판정 근거가 lottery_status='lost' 하나뿐이다. 관리자가 탈락 건을 삭제하거나
+--  rescheduleLoser 로 날짜를 옮기면(이때 lottery_status 가 NULL 로 초기화된다)
+--  그 직원은 추가 신청 대상에서 빠진다. 추첨 후 탈락 건은 그대로 두어야 한다.
+--
+--  - extra_request_deadline: NULL = 추가 신청 기간 없음.
+--  - extra_request_year / extra_request_quarter: 24 합계를 계산할 대상 분기.
+--    마감일에서 추론하지 않고 관리자가 설정 화면에서 명시적으로 지정한다
+--    (예: 3분기 검증 중에 마감일을 4분기 첫날로 잡는 경우를 위해).
+--  - 세 값은 함께 채우거나 함께 비운다. 클라이언트가 저장 시 검증한다.
+--  - 판정 주체는 사용자 캘린더(클라이언트)다. request_freeze_date 와 동일하게
+--    DB 레벨 강제는 없다 — 섹션 12 의 [보안 한계] 참고.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists extra_request_deadline date;
+alter table public.app_settings
+  add column if not exists extra_request_year integer;
+alter table public.app_settings
+  add column if not exists extra_request_quarter integer
+    check (extra_request_quarter between 1 and 4);

@@ -247,6 +247,7 @@ select count(*) from public.holidays
 | 18 | 주간/야간 지정근무(`jigeun_day_turns`/`jigeun_night_turns`) | 섹션 15 를 대체 |
 | 19 | `special_schedules` → `coworker_list` 외래키 | 실행 전 고아 레코드 확인 |
 | 20 | 승무소명(`office_name`) | 교번 목록 접두사 필터. 보통 비워둔다 |
+| 21 | 추가 신청일(`extra_request_deadline`/`_year`/`_quarter`) | 1차 마감 후 2차 신청 기간. 비우면 없음 |
 
 주의:
 - **EXPLAIN/Analyze 모드를 끄고** 일반 Run 으로 실행한다. 여러 SQL

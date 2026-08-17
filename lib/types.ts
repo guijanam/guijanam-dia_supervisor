@@ -70,6 +70,8 @@ export const DEFAULT_JIGEUN_CAPS: JigeunCaps = {
 // jigeunTurns 는 요일/공휴일과 무관하게 지근으로 표시되는 주간/야간 근무번호 목록.
 // holidayTurnRules 는 연속 이틀이 모두 휴일일 때 표시만 바꾸는 근무번호 짝 규칙.
 // officeName 은 이 배포가 담당하는 승무소명(교번 목록 접두사 필터).
+// extraRequest* 는 1차 마감 후 열리는 2차 신청 기간(추가 신청일) 설정 —
+// 지정 분기 합계가 24 가 아닌 직원에게만 '등록' 이 다시 열린다(삭제는 불가).
 export interface AppSettings {
   caps: JigeunCaps;
   requestFreezeDate: string | null;
@@ -77,7 +79,18 @@ export interface AppSettings {
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
   officeName: string;
+  extraRequestDeadline: string | null;
+  extraRequestYear: number | null;
+  extraRequestQuarter: number | null;
 }
+
+// 사용자의 지근/지휴 신청 가능 단계.
+//  - open   : 1차 마감 전(또는 마감 미설정). 등록·삭제 모두 허용.
+//  - extra  : 1차 마감 후 추가 신청일 이내 && 본인이 그 분기 추첨에서 탈락
+//             (lottery_status='lost')한 건이 있음. 등록·삭제 모두 허용 —
+//             떨어진 자리를 다른 날로 다시 잡으려면 삭제도 필요하기 때문.
+//  - closed : 그 외 전부 차단.
+export type RequestPhase = "open" | "extra" | "closed";
 
 // 승무소명. 교번(work_patterns) 이름의 접두사로 쓰여 이 승무소 교번만
 // 목록에 보이게 거른다. 빈 문자열이면 필터를 걸지 않고 전체를 보여준다 —

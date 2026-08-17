@@ -33,6 +33,7 @@ import {
   getTurnDisplay,
 } from "@/lib/schedule-utils";
 import { useMonthState } from "@/lib/use-month-state";
+import { lostWarningSuffix, lostBulkWarning } from "@/lib/lottery-warning";
 import { cn } from "@/lib/utils";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
@@ -101,6 +102,9 @@ export interface SettingsSnapshot {
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
   officeName: string;
+  extraRequestDeadline: string | null;
+  extraRequestYear: number | null;
+  extraRequestQuarter: number | null;
 }
 
 interface RequestsPanelProps {
@@ -173,14 +177,15 @@ export function RequestsPanel({
       ] = await Promise.all([
         supabase
           .from("special_schedules")
-          .select("id, staff_id, target_date, record_type, created_at")
+          // lottery_status 는 탈락 건 삭제 시 경고를 띄우는 데 쓴다.
+          .select("id, staff_id, target_date, record_type, created_at, lottery_status")
           .gte("target_date", start)
           .lte("target_date", end)
           .order("target_date", { ascending: true }),
         fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("app_settings")
-          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, office_name")
+          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, office_name, extra_request_deadline, extra_request_year, extra_request_quarter")
           .eq("id", 1)
           .maybeSingle(),
         supabase
@@ -204,6 +209,9 @@ export function RequestsPanel({
         jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
         office_name: string | null;
+        extra_request_deadline: string | null;
+        extra_request_year: number | null;
+        extra_request_quarter: number | null;
       } | null;
       const caps = s
         ? {
@@ -236,6 +244,9 @@ export function RequestsPanel({
         jigeunTurns: loadedJigeunTurns,
         holidayTurnRules: holidayRules,
         officeName: s?.office_name ?? DEFAULT_OFFICE_NAME,
+        extraRequestDeadline: s?.extra_request_deadline ?? null,
+        extraRequestYear: s?.extra_request_year ?? null,
+        extraRequestQuarter: s?.extra_request_quarter ?? null,
       });
 
       // 연휴 짝 치환 판정에 필요 — state 반영 전에 로컬 Set 으로 먼저 사용
@@ -488,7 +499,8 @@ export function RequestsPanel({
   const deleteRow = async (row: Row) => {
     if (
       !confirm(
-        `${row.employee?.staff_name ?? ""}님의 ${row.target_date} 기록을 삭제할까요?`
+        `${row.employee?.staff_name ?? ""}님의 ${row.target_date} 기록을 삭제할까요?` +
+          lostWarningSuffix(row, "삭제하면")
       )
     )
       return;
@@ -770,9 +782,11 @@ export function RequestsPanel({
   };
 
   const openDeleteAll = () => {
+    const lostCount = rows.filter((r) => r.lottery_status === "lost").length;
     if (
       !confirm(
-        `[경고] ${monthValue} 월의 모든 신청 내역을 삭제합니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`
+        `[경고] ${monthValue} 월의 모든 신청 내역을 삭제합니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?` +
+          lostBulkWarning(lostCount)
       )
     )
       return;

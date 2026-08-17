@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
-import type { Employee, RecordType, SpecialSchedule } from "@/lib/types";
+import type {
+  Employee,
+  RecordType,
+  SpecialSchedule,
+  RequestPhase,
+} from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -24,8 +29,13 @@ interface DayModalProps {
   substitutedTurn?: string | null;
   existing: SpecialSchedule | null;
   allEntries: DayEntry[];
-  isFrozen: boolean;
+  // 신청 단계. 등록/삭제 허용 여부는 아래 두 플래그가 결정하고, phase 는
+  // 안내 문구를 고르는 데 쓴다.
+  phase: RequestPhase;
+  canRegister: boolean;
+  canDelete: boolean;
   freezeDate: string | null;
+  extraDeadline: string | null;
   onClose: () => void;
   onChanged: () => void;
 }
@@ -37,8 +47,11 @@ export function DayModal({
   substitutedTurn,
   existing,
   allEntries,
-  isFrozen,
+  phase,
+  canRegister,
+  canDelete,
   freezeDate,
+  extraDeadline,
   onClose,
   onChanged,
 }: DayModalProps) {
@@ -48,7 +61,7 @@ export function DayModal({
   if (!date) return null;
 
   const register = async (recordType: RecordType) => {
-    if (isFrozen) return;
+    if (!canRegister) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -74,7 +87,7 @@ export function DayModal({
 
   const remove = async () => {
     if (!existing) return;
-    if (isFrozen) return;
+    if (!canDelete) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -184,7 +197,14 @@ export function DayModal({
           )}
         </div>
 
-        {isFrozen && (
+        {phase === "extra" && (
+          <p className="text-xs text-emerald-700 dark:text-emerald-300 text-center">
+            추첨 탈락으로 열린 <b>추가 신청 기간</b>({extraDeadline}까지)입니다.
+            신청·삭제를 자유롭게 하실 수 있습니다.
+          </p>
+        )}
+
+        {phase === "closed" && (
           <p className="text-xs text-amber-700 dark:text-amber-300 text-center">
             관리자가 지정한 신청 마감일({freezeDate})이 지나
             지근/지휴 신청·삭제가 제한됩니다.
@@ -194,14 +214,14 @@ export function DayModal({
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant={existing?.record_type === "지근" ? "default" : "outline"}
-            disabled={isSaving || isFrozen}
+            disabled={isSaving || !canRegister}
             onClick={() => register("지근")}
           >
             지근 신청
           </Button>
           <Button
             variant={existing?.record_type === "지휴" ? "default" : "outline"}
-            disabled={isSaving || isFrozen}
+            disabled={isSaving || !canRegister}
             onClick={() => register("지휴")}
           >
             지휴 신청
@@ -211,7 +231,7 @@ export function DayModal({
         {existing && (
           <Button
             variant="destructive"
-            disabled={isSaving || isFrozen}
+            disabled={isSaving || !canDelete}
             onClick={remove}
             className="w-full"
           >

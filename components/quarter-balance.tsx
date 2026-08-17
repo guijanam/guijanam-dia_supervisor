@@ -3,23 +3,13 @@
 import { useState, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import { useAuth } from "@/lib/auth-context";
-import type { RecordType, ScheduleRecord } from "@/lib/types";
+import { QUARTER_TARGET, QUARTERS } from "@/lib/quarter";
 import {
-  DEFAULT_WEEKEND_HOLIDAY_TURNS,
-  DEFAULT_JIGEUN_TURNS,
-  DEFAULT_HOLIDAY_TURN_RULES,
-  parseTurnsText,
-  parseHolidayTurnRulesText,
-} from "@/lib/types";
-import {
-  getDayName,
-  padDateRange,
-  applyHolidayTurnRulesByStaffKey,
-  isHueTurnOnDate,
-} from "@/lib/schedule-utils";
-import { format } from "date-fns";
+  fetchQuarterTotals,
+  quarterTotal,
+  type QuarterTotals,
+} from "@/lib/quarter-balance-calc";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -34,57 +24,17 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { QuarterBalanceCalendarModal } from "@/components/quarter-balance-calendar-modal";
 import { Loader2, LogOut, Download } from "lucide-react";
 
-// 분기별 휴무 목표치: 운휴 + 휴 + 지휴 − 지근 = 24
-const QUARTER_TARGET = 24;
-
 const POSITIONS = ["기관사", "차장"] as const;
 type Position = (typeof POSITIONS)[number];
 
-export const QUARTERS = [
-  { value: 1, label: "1분기 (1~3월)", startMonth: 1 },
-  { value: 2, label: "2분기 (4~6월)", startMonth: 4 },
-  { value: 3, label: "3분기 (7~9월)", startMonth: 7 },
-  { value: 4, label: "4분기 (10~12월)", startMonth: 10 },
-] as const;
+// 기존 import 를 깨지 않도록 re-export (quarter-balance-calendar-modal 등).
+export { QUARTERS };
 
-interface StaffRow {
+interface StaffRow extends QuarterTotals {
   staff_id: number;
   staff_name: string;
   staff_position: string;
   employee_number: string | null;
-  hueCount: number; // 휴무 (turn 에 '휴')
-  weekendTurnCount: number; // 운휴 (주말/공휴일 & 31~37번)
-  jihyuCount: number; // 지휴 (+)
-  jigeunCount: number; // 지근 (−)
-}
-
-function quarterRange(year: number, quarter: number): { start: string; end: string } {
-  const q = QUARTERS.find((x) => x.value === quarter)!;
-  const startMonth = q.startMonth; // 1, 4, 7, 10
-  const start = new Date(year, startMonth - 1, 1);
-  // 분기 마지막 달의 말일
-  const end = new Date(year, startMonth + 2, 0);
-  return { start: format(start, "yyyy-MM-dd"), end: format(end, "yyyy-MM-dd") };
-}
-
-// get_schedule_by_range RPC 는 서버에서 10,000행으로 잘립니다(staff_id 오름차순).
-// 분기 전체(약 23,000행)를 한 번에 부르면 낮은 staff_id(기관사)가 한도를
-// 다 차지해 높은 staff_id(차장)가 누락됩니다. 그래서 월 단위(약 8,000행)로
-// 나눠 호출합니다.
-function quarterMonths(
-  year: number,
-  quarter: number
-): Array<{ start: string; end: string }> {
-  const q = QUARTERS.find((x) => x.value === quarter)!;
-  return [0, 1, 2].map((offset) => {
-    const m = q.startMonth - 1 + offset;
-    const start = new Date(year, m, 1);
-    const end = new Date(year, m + 1, 0);
-    return {
-      start: format(start, "yyyy-MM-dd"),
-      end: format(end, "yyyy-MM-dd"),
-    };
-  });
 }
 
 export function QuarterBalance() {
@@ -106,83 +56,17 @@ export function QuarterBalance() {
     setIsLoading(true);
     setError(null);
     setHasFetched(true);
-    const { start, end } = quarterRange(year, quarter);
-    const months = quarterMonths(year, quarter);
-    // 분기 경계에 걸친 운휴대기 짝도 판정하려면 앞뒤로 여유가 필요하다.
-    const padded = padDateRange(start, end);
 
     try {
-      const [
-        monthlySchedules,
-        specialResult,
-        holidayResult,
-        empResult,
-        settingsResult,
-      ] = await Promise.all([
-        // 월 단위로 나눠 호출 후 합산. 각 호출은 내부에서 페이지네이션되므로
-        // 행 수 한도에 잘리지 않는다.
-        Promise.all(
-          months.map((m, i) =>
-            fetchScheduleByRange(
-              // 첫 달은 앞으로, 마지막 달은 뒤로 여유를 둔다(분기 경계 짝 판정용).
-              i === 0 ? padded.start : m.start,
-              i === months.length - 1 ? padded.end : m.end
-            )
-          )
-        ),
-        supabase
-          .from("special_schedules")
-          .select("staff_id, target_date, record_type")
-          .gte("target_date", start)
-          .lte("target_date", end),
-        supabase
-          .from("holidays")
-          .select("locdate")
-          .eq("is_holiday", "Y")
-          .gte("locdate", padded.start)
-          .lte("locdate", padded.end),
+      // 집계는 공용 함수가 담당한다(사용자 캘린더의 추가 신청 판정과 동일 기준).
+      // 여기서는 이름·직책·사번만 덧붙인다.
+      const [totalsByStaff, empResult] = await Promise.all([
+        fetchQuarterTotals(year, quarter),
         supabase
           .from("coworker_list")
           .select("staff_id, staff_name, staff_position, employee_number"),
-        supabase
-          .from("app_settings")
-          .select(
-            "weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules"
-          )
-          .eq("id", 1)
-          .maybeSingle(),
       ]);
-
-      const scheduleData: ScheduleRecord[] = [];
-      for (const rows of monthlySchedules) {
-        scheduleData.push(...rows);
-      }
-      if (specialResult.error) throw specialResult.error;
-      if (holidayResult.error) throw holidayResult.error;
       if (empResult.error) throw empResult.error;
-
-      const settings = settingsResult.data as {
-        weekend_holiday_turns: string | null;
-        jigeun_day_turns: string | null;
-        jigeun_night_turns: string | null;
-        holiday_turn_rules: string | null;
-      } | null;
-      const holidayRules = settings
-        ? parseHolidayTurnRulesText(settings.holiday_turn_rules)
-        : DEFAULT_HOLIDAY_TURN_RULES;
-      const weekendHolidayTurns = settings
-        ? parseTurnsText(settings.weekend_holiday_turns)
-        : DEFAULT_WEEKEND_HOLIDAY_TURNS;
-      const jigeunTurns = settings
-        ? {
-            dayTurns: parseTurnsText(settings.jigeun_day_turns),
-            nightTurns: parseTurnsText(settings.jigeun_night_turns),
-          }
-        : DEFAULT_JIGEUN_TURNS;
-
-      const holidays = new Set<string>(
-        (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
-      );
 
       // staff_id → 직원 정보
       const empMap = new Map<
@@ -197,83 +81,20 @@ export function QuarterBalance() {
         });
       }
 
-      // staff_id → 집계 누적
-      const acc = new Map<number, StaffRow>();
-      const ensure = (staffId: number): StaffRow => {
-        let r = acc.get(staffId);
-        if (!r) {
-          const emp = empMap.get(staffId);
-          r = {
-            staff_id: staffId,
-            staff_name: emp?.staff_name ?? `(미상 ${staffId})`,
-            staff_position: emp?.staff_position ?? "",
-            employee_number: emp?.employee_number ?? null,
-            hueCount: 0,
-            weekendTurnCount: 0,
-            jihyuCount: 0,
-            jigeunCount: 0,
-          };
-          acc.set(staffId, r);
-        }
-        return r;
-      };
-
-      // 운휴대기 치환 맵. 분기 밖(패딩) 날짜는 짝 판정용 context 로만 쓴다 —
-      // 집계에 섞이면 분기 휴무 수가 부풀려진다.
-      const regularByStaff = new Map<string, string>();
-      const contextByStaff = new Map<string, string>();
-      for (const row of scheduleData) {
-        const dateStr = row.date
-          ? format(new Date(row.date), "yyyy-MM-dd")
-          : "";
-        if (!dateStr) continue;
-        const key = `${row.staff_id}|${dateStr}`;
-        if (dateStr >= start && dateStr <= end) regularByStaff.set(key, row.turn);
-        else contextByStaff.set(key, row.turn);
-      }
-      const displayByStaff = applyHolidayTurnRulesByStaffKey(
-        regularByStaff,
-        holidays,
-        holidayRules,
-        contextByStaff
-      );
-
-      // 정규 근무표: 휴무 / 운휴 집계 (user-calendar 로직 그대로).
-      // 휴무는 치환 후 근무번호 기준, 운휴는 원본 기준.
-      for (const row of scheduleData) {
-        const dateStr = row.date
-          ? format(new Date(row.date), "yyyy-MM-dd")
-          : "";
-        if (!dateStr) continue;
-        if (dateStr < start || dateStr > end) continue; // 패딩 날짜는 집계 제외
-        const r = ensure(row.staff_id);
-        const key = `${row.staff_id}|${dateStr}`;
-        if (isHueTurnOnDate(key, regularByStaff, displayByStaff, jigeunTurns)) {
-          r.hueCount++;
-        }
-        const dayName = getDayName(dateStr);
-        const isHoliday =
-          dayName === "토" || dayName === "일" || holidays.has(dateStr);
-        if (isHoliday && weekendHolidayTurns.includes(row.turn)) {
-          r.weekendTurnCount++;
-        }
-      }
-
-      // 지근/지휴 신청 내역
-      for (const sp of (specialResult.data ?? []) as Array<{
-        staff_id: number;
-        target_date: string;
-        record_type: RecordType;
-      }>) {
-        const r = ensure(sp.staff_id);
-        if (sp.record_type === "지휴") r.jihyuCount++;
-        else if (sp.record_type === "지근") r.jigeunCount++;
+      const merged: StaffRow[] = [];
+      for (const [staffId, t] of totalsByStaff) {
+        const emp = empMap.get(staffId);
+        merged.push({
+          staff_id: staffId,
+          staff_name: emp?.staff_name ?? `(미상 ${staffId})`,
+          staff_position: emp?.staff_position ?? "",
+          employee_number: emp?.employee_number ?? null,
+          ...t,
+        });
       }
 
       // 이름에 "결원"이 포함된 가상 직원은 검증 대상에서 제외
-      setRows(
-        [...acc.values()].filter((r) => !r.staff_name.includes("결원"))
-      );
+      setRows(merged.filter((r) => !r.staff_name.includes("결원")));
     } catch (err) {
       setError(err instanceof Error ? err.message : "데이터 로딩 실패");
     } finally {
@@ -282,8 +103,7 @@ export function QuarterBalance() {
   }, [year, quarter]);
 
   // 합계 = 휴무 + 운휴 + 지휴 − 지근. 24 가 아닌 직원만 표시.
-  const total = (r: StaffRow) =>
-    r.hueCount + r.weekendTurnCount + r.jihyuCount - r.jigeunCount;
+  const total = (r: StaffRow) => quarterTotal(r);
 
   const mismatched = useMemo(() => {
     return rows

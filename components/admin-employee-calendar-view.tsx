@@ -478,8 +478,12 @@ export function AdminEmployeeCalendarView({
         }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
-        isFrozen={false}
+        // 관리자는 신청 마감일·추가 신청일과 무관하게 등록·삭제 모두 가능하다.
+        phase="open"
+        canRegister
+        canDelete
         freezeDate={null}
+        extraDeadline={null}
         onClose={() => setSelectedDate(null)}
         onChanged={() => {
           fetchData();

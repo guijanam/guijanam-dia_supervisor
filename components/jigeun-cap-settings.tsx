@@ -19,6 +19,7 @@ import {
   validateHolidayTurnRulesText,
   validateJigeunTurns,
 } from "@/lib/types";
+import { QUARTERS } from "@/lib/quarter";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,9 @@ interface Props {
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
   officeName: string;
+  extraDeadline: string | null;
+  extraYear: number | null;
+  extraQuarter: number | null;
   onSaved: () => void;
 }
 
@@ -54,6 +58,9 @@ export function JigeunCapSettings({
   jigeunTurns,
   holidayTurnRules,
   officeName,
+  extraDeadline,
+  extraYear,
+  extraQuarter,
   onSaved,
 }: Props) {
   const { isAdmin, employee } = useAuth();
@@ -76,6 +83,15 @@ export function JigeunCapSettings({
     formatHolidayTurnRulesText(holidayTurnRules)
   );
   const [draftOfficeName, setDraftOfficeName] = useState<string>(officeName);
+  const [draftExtraDeadline, setDraftExtraDeadline] = useState<string>(
+    extraDeadline ?? ""
+  );
+  const [draftExtraYear, setDraftExtraYear] = useState<string>(
+    extraYear != null ? String(extraYear) : ""
+  );
+  const [draftExtraQuarter, setDraftExtraQuarter] = useState<string>(
+    extraQuarter != null ? String(extraQuarter) : ""
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,6 +105,9 @@ export function JigeunCapSettings({
       setDraftNightTurnsText(formatTurnsText(jigeunTurns.nightTurns));
       setDraftHolidayRulesText(formatHolidayTurnRulesText(holidayTurnRules));
       setDraftOfficeName(officeName);
+      setDraftExtraDeadline(extraDeadline ?? "");
+      setDraftExtraYear(extraYear != null ? String(extraYear) : "");
+      setDraftExtraQuarter(extraQuarter != null ? String(extraQuarter) : "");
       setError(null);
     }
   }, [
@@ -99,6 +118,9 @@ export function JigeunCapSettings({
     jigeunTurns,
     holidayTurnRules,
     officeName,
+    extraDeadline,
+    extraYear,
+    extraQuarter,
   ]);
 
   if (!isAdmin || !employee) return null;
@@ -131,6 +153,29 @@ export function JigeunCapSettings({
       return;
     }
 
+    // 추가 신청일은 날짜·년·분기가 함께 있어야 판정이 가능하다.
+    // 셋 중 일부만 채우면 사용자 화면에서 조용히 무시되므로 여기서 막는다.
+    const extraYearNum = draftExtraYear ? Number(draftExtraYear) : null;
+    const extraQuarterNum = draftExtraQuarter ? Number(draftExtraQuarter) : null;
+    if (draftExtraDeadline) {
+      if (!extraYearNum || !extraQuarterNum) {
+        setError("추가 신청일을 쓰려면 대상 분기의 년·분기도 함께 지정하세요.");
+        return;
+      }
+      // 1차 마감 다음날부터 열리는 기간이므로 마감일보다 뒤여야 한다.
+      if (!draftFreezeDate) {
+        setError("추가 신청일은 신청 마감일이 있어야 의미가 있습니다.");
+        return;
+      }
+      if (draftExtraDeadline <= draftFreezeDate) {
+        setError("추가 신청일은 신청 마감일보다 뒤여야 합니다.");
+        return;
+      }
+    } else if (extraYearNum || extraQuarterNum) {
+      setError("추가 신청일을 비우려면 년·분기도 함께 비우세요.");
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
@@ -153,6 +198,10 @@ export function JigeunCapSettings({
             normalizedHolidayRules
           ),
           office_name: draftOfficeName.trim(),
+          // 날짜를 비우면 년·분기도 함께 NULL 로 되돌린다.
+          extra_request_deadline: draftExtraDeadline ? draftExtraDeadline : null,
+          extra_request_year: draftExtraDeadline ? extraYearNum : null,
+          extra_request_quarter: draftExtraDeadline ? extraQuarterNum : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -179,8 +228,10 @@ export function JigeunCapSettings({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
+        {/* 설정 항목이 많아 세로로 길다. 화면 높이 안에 가두고 가운데 영역만
+            스크롤시켜, 하단 저장 버튼이 항상 보이게 한다. */}
+        <DialogContent className="max-h-[90dvh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0">
+          <DialogHeader className="pb-4">
             <DialogTitle>설정</DialogTitle>
             <DialogDescription>
               요일/공휴일 구분별 지근 정원입니다. 기관사·차장 공통으로
@@ -188,159 +239,223 @@ export function JigeunCapSettings({
             </DialogDescription>
           </DialogHeader>
 
-          {error && (
-            <p className="text-destructive text-sm font-medium">{error}</p>
-          )}
+          {/* 좌우 음수 마진은 스크롤바가 다이얼로그 안쪽 여백에 붙게 한다. */}
+          <div className="flex flex-col gap-4 overflow-y-auto -mx-6 px-6">
+            {error && (
+              <p className="text-destructive text-sm font-medium">{error}</p>
+            )}
 
-          <div className="flex flex-col gap-1 pb-2 border-b">
-            <div className="flex items-start gap-3">
-              <label className="w-16 text-sm font-medium pt-2">승무소</label>
-              <Input
-                type="text"
-                className="h-9"
-                placeholder="예: 동대문승무소"
-                value={draftOfficeName}
-                disabled={isSaving}
-                onChange={(e) => setDraftOfficeName(e.target.value)}
-              />
+            <div className="flex flex-col gap-1 pb-2 border-b">
+              <div className="flex items-start gap-3">
+                <label className="w-16 text-sm font-medium pt-2">승무소</label>
+                <Input
+                  type="text"
+                  className="h-9"
+                  placeholder="예: 동대문승무소"
+                  value={draftOfficeName}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftOfficeName(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground pl-[4.75rem]">
+                교번 관리에서 이 승무소 교번만 보이도록 거르는 이름 접두사입니다.
+                한 DB 에 여러 승무소 교번이 섞여 있을 때만 입력하세요.{" "}
+                <b>비우면 전체 교번이 보입니다.</b>
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground pl-[4.75rem]">
-              교번 관리에서 이 승무소 교번만 보이도록 거르는 이름 접두사입니다.
-              한 DB 에 여러 승무소 교번이 섞여 있을 때만 입력하세요.{" "}
-              <b>비우면 전체 교번이 보입니다.</b>
-            </p>
-          </div>
 
-          <div className="flex flex-col gap-3">
-            {FIELDS.map((f) => (
-              <div key={f.key} className="flex items-center gap-3">
-                <label className="w-16 text-sm font-medium">{f.label}</label>
+            <div className="flex flex-col gap-3">
+              {FIELDS.map((f) => (
+                <div key={f.key} className="flex items-center gap-3">
+                  <label className="w-16 text-sm font-medium">{f.label}</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    className="h-9"
+                    value={String(draft[f.key])}
+                    disabled={isSaving}
+                    onChange={(e) => setField(f.key, e.target.value)}
+                  />
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    명
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-center gap-3">
+                <label className="w-16 text-sm font-medium">신청 마감일</label>
+                <Input
+                  type="date"
+                  className="h-9"
+                  value={draftFreezeDate}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftFreezeDate(e.target.value)}
+                />
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setDraftFreezeDate("")}
+                  disabled={isSaving || !draftFreezeDate}
+                  title="마감일 해제"
+                >
+                  해제
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground pl-[4.75rem]">
+                비우면 마감 없음. 마감일 다음날 0시부터 사용자의 지근/지휴
+                신청·삭제가 차단됩니다.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-center gap-3">
+                <label className="w-16 text-sm font-medium">추가 신청일</label>
+                <Input
+                  type="date"
+                  className="h-9"
+                  value={draftExtraDeadline}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftExtraDeadline(e.target.value)}
+                />
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    setDraftExtraDeadline("");
+                    setDraftExtraYear("");
+                    setDraftExtraQuarter("");
+                  }}
+                  disabled={isSaving || !draftExtraDeadline}
+                  title="추가 신청 기간 해제"
+                >
+                  해제
+                </Button>
+              </div>
+              <div className="flex items-center gap-3 pl-[4.75rem]">
                 <Input
                   type="number"
-                  min={0}
                   inputMode="numeric"
-                  className="h-9"
-                  value={String(draft[f.key])}
+                  className="h-9 w-28"
+                  placeholder="년"
+                  value={draftExtraYear}
                   disabled={isSaving}
-                  onChange={(e) => setField(f.key, e.target.value)}
+                  onChange={(e) => setDraftExtraYear(e.target.value)}
                 />
-                <span className="text-xs text-muted-foreground shrink-0">
-                  명
-                </span>
+                <select
+                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                  value={draftExtraQuarter}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftExtraQuarter(e.target.value)}
+                >
+                  <option value="">분기 선택</option>
+                  {QUARTERS.map((q) => (
+                    <option key={q.value} value={String(q.value)}>
+                      {q.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-            ))}
-          </div>
-
-          <div className="flex flex-col gap-1 pt-2 border-t">
-            <div className="flex items-center gap-3">
-              <label className="w-16 text-sm font-medium">신청 마감일</label>
-              <Input
-                type="date"
-                className="h-9"
-                value={draftFreezeDate}
-                disabled={isSaving}
-                onChange={(e) => setDraftFreezeDate(e.target.value)}
-              />
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setDraftFreezeDate("")}
-                disabled={isSaving || !draftFreezeDate}
-                title="마감일 해제"
-              >
-                해제
-              </Button>
+              <p className="text-xs text-muted-foreground pl-[4.75rem]">
+                1차 마감 이후 이 날짜까지, 선택한 분기에서{" "}
+                <b>추첨에 떨어진(탈락) 직원에게만</b> 지근/지휴 신청이 다시
+                열립니다. 떨어진 자리를 스스로 다시 잡게 하는 용도라 이 기간에는{" "}
+                <b>신청·삭제가 모두 가능</b>합니다. 비우면 추가 신청 기간 없음.
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-400 pl-[4.75rem]">
+                ⚠ 탈락 판정은 <code>lottery_status=&apos;lost&apos;</code> 로
+                합니다. 탈락자를 <b>삭제하거나 다른 날짜로 옮기면</b> 이 표시가
+                사라져 대상에서 빠지니, 추첨 후 탈락 건은 그대로 두세요.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground pl-[4.75rem]">
-              비우면 마감 없음. 마감일 다음날 0시부터 사용자의 지근/지휴
-              신청·삭제가 차단됩니다.
-            </p>
-          </div>
 
-          <div className="flex flex-col gap-1 pt-2 border-t">
-            <div className="flex items-start gap-3">
-              <label className="w-16 text-sm font-medium pt-2">운휴 번호</label>
-              <Input
-                type="text"
-                className="h-9"
-                placeholder="예: 31,32,33,34,35,36,37"
-                value={draftTurnsText}
-                disabled={isSaving}
-                onChange={(e) => setDraftTurnsText(e.target.value)}
-              />
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-start gap-3">
+                <label className="w-16 text-sm font-medium pt-2">운휴 번호</label>
+                <Input
+                  type="text"
+                  className="h-9"
+                  placeholder="예: 31,32,33,34,35,36,37"
+                  value={draftTurnsText}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftTurnsText(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground pl-[4.75rem]">
+                주말/공휴일에 운휴로 집계할 근무번호를 쉼표로 구분해 입력하세요.
+                승무소마다 다르며, 비우면 운휴 집계가 되지 않습니다.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground pl-[4.75rem]">
-              주말/공휴일에 운휴로 집계할 근무번호를 쉼표로 구분해 입력하세요.
-              승무소마다 다르며, 비우면 운휴 집계가 되지 않습니다.
-            </p>
-          </div>
 
-          <div className="flex flex-col gap-1 pt-2 border-t">
-            <div className="flex items-start gap-3">
-              <label className="w-24 text-sm font-medium pt-2 shrink-0">
-                주간 지정근무
-              </label>
-              <Input
-                type="text"
-                className="h-9"
-                placeholder="예: 41,42,43"
-                value={draftDayTurnsText}
-                disabled={isSaving}
-                onChange={(e) => setDraftDayTurnsText(e.target.value)}
-              />
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-start gap-3">
+                <label className="w-24 text-sm font-medium pt-2 shrink-0">
+                  주간 지정근무
+                </label>
+                <Input
+                  type="text"
+                  className="h-9"
+                  placeholder="예: 41,42,43"
+                  value={draftDayTurnsText}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftDayTurnsText(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground pl-[6.75rem]">
+                주간 지정근무로 표시할 근무번호를 쉼표로 구분해 입력하세요.
+                달력·엑셀에 <b>지(주)</b> 로 표시됩니다.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground pl-[6.75rem]">
-              주간 지정근무로 표시할 근무번호를 쉼표로 구분해 입력하세요.
-              달력·엑셀에 <b>지(주)</b> 로 표시됩니다.
-            </p>
-          </div>
 
-          <div className="flex flex-col gap-1 pt-2 border-t">
-            <div className="flex items-start gap-3">
-              <label className="w-24 text-sm font-medium pt-2 shrink-0">
-                야간 지정근무
-              </label>
-              <Input
-                type="text"
-                className="h-9"
-                placeholder="예: 58,59"
-                value={draftNightTurnsText}
-                disabled={isSaving}
-                onChange={(e) => setDraftNightTurnsText(e.target.value)}
-              />
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-start gap-3">
+                <label className="w-24 text-sm font-medium pt-2 shrink-0">
+                  야간 지정근무
+                </label>
+                <Input
+                  type="text"
+                  className="h-9"
+                  placeholder="예: 58,59"
+                  value={draftNightTurnsText}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftNightTurnsText(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground pl-[6.75rem]">
+                야간 지정근무로 표시할 근무번호를 쉼표로 구분해 입력하세요.
+                달력·엑셀에 <b>지(야)</b> 로 표시됩니다. 두 칸 모두 요일/공휴일과
+                무관하게 적용되며, 같은 번호를 주간·야간에 함께 넣을 수 없습니다.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground pl-[6.75rem]">
-              야간 지정근무로 표시할 근무번호를 쉼표로 구분해 입력하세요.
-              달력·엑셀에 <b>지(야)</b> 로 표시됩니다. 두 칸 모두 요일/공휴일과
-              무관하게 적용되며, 같은 번호를 주간·야간에 함께 넣을 수 없습니다.
-            </p>
-          </div>
 
-          <div className="flex flex-col gap-1 pt-2 border-t">
-            <div className="flex items-start gap-3">
-              <label className="w-16 text-sm font-medium pt-2">운휴대기</label>
-              <Input
-                type="text"
-                className="h-9"
-                placeholder="예: 58,58~:휴73,휴74;61,61~,휴14:휴79,지(야),지(야)~"
-                value={draftHolidayRulesText}
-                disabled={isSaving}
-                onChange={(e) => setDraftHolidayRulesText(e.target.value)}
-              />
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-start gap-3">
+                <label className="w-16 text-sm font-medium pt-2">운휴대기</label>
+                <Input
+                  type="text"
+                  className="h-9"
+                  placeholder="예: 58,58~:휴73,휴74;61,61~,휴14:휴79,지(야),지(야)~"
+                  value={draftHolidayRulesText}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftHolidayRulesText(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground pl-[4.75rem]">
+                연속된 <b>앞 이틀</b>이 모두 토/일/공휴일일 때만 표시가 바뀝니다.
+                형식은 <code>원래들:표시들</code> 이며 양쪽 개수가 같아야 합니다
+                (2개 이상). 여러 짝은 <code>;</code> 로 구분합니다. 3개 이상으로
+                적으면 셋째 날부터는 휴일 여부와 무관하게 함께 치환됩니다 — 연휴
+                다음 근무일까지 이어지는 근무에 쓰세요. 예:{" "}
+                <code>61,61~,휴14:휴79,지(야),지(야)~</code>. 앞 이틀 중 한쪽만
+                휴일이면 치환되지 않습니다. 표시만 바뀔 뿐 휴무/운휴/총휴 집계는
+                원래 근무번호 기준 그대로입니다.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground pl-[4.75rem]">
-              연속된 <b>앞 이틀</b>이 모두 토/일/공휴일일 때만 표시가 바뀝니다.
-              형식은 <code>원래들:표시들</code> 이며 양쪽 개수가 같아야 합니다
-              (2개 이상). 여러 짝은 <code>;</code> 로 구분합니다. 3개 이상으로
-              적으면 셋째 날부터는 휴일 여부와 무관하게 함께 치환됩니다 — 연휴
-              다음 근무일까지 이어지는 근무에 쓰세요. 예:{" "}
-              <code>61,61~,휴14:휴79,지(야),지(야)~</code>. 앞 이틀 중 한쪽만
-              휴일이면 치환되지 않습니다. 표시만 바뀔 뿐 휴무/운휴/총휴 집계는
-              원래 근무번호 기준 그대로입니다.
-            </p>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-2 pt-4 border-t">
             <Button
               variant="ghost"
               onClick={() => {

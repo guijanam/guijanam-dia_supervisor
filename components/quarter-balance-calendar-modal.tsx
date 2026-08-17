@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { AdminEmployeeCalendarView } from "@/components/admin-employee-calendar-view";
-import { QUARTERS } from "@/components/quarter-balance";
+import { QUARTERS } from "@/lib/quarter";
 import { cn } from "@/lib/utils";
 
 interface QuarterBalanceCalendarModalProps {

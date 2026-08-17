@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { lostWarningSuffix } from "@/lib/lottery-warning";
 import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import type {
   RecordType,
@@ -197,9 +198,12 @@ export function LoserRescheduleCalendar({
     if (mineMap.has(date)) return;
     if (busy) return;
     const dayName = getDayName(date);
+    // 이 화면은 탈락자 재배치 전용이라 대상은 항상 탈락 건이다.
+    // 옮기면 lottery_status 가 NULL 로 초기화되어 추가 신청 대상에서 빠진다.
     if (
       !confirm(
-        `${entry.staff_name}님의 지근을 ${date}(${dayName})로 이동할까요?`
+        `${entry.staff_name}님의 지근을 ${date}(${dayName})로 이동할까요?` +
+          lostWarningSuffix({ lottery_status: "lost" }, "옮기면")
       )
     )
       return;

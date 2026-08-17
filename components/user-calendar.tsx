@@ -9,7 +9,14 @@ import type {
   SpecialSchedule,
   HolidayTurnRule,
   JigeunTurnSettings,
+  RequestPhase,
 } from "@/lib/types";
+import { QUARTER_TARGET } from "@/lib/quarter";
+import {
+  fetchQuarterTotals,
+  quarterTotal,
+  emptyQuarterTotals,
+} from "@/lib/quarter-balance-calc";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
@@ -86,12 +93,82 @@ export function UserCalendar() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [extraDeadline, setExtraDeadline] = useState<string | null>(null);
+  const [extraYear, setExtraYear] = useState<number | null>(null);
+  const [extraQuarter, setExtraQuarter] = useState<number | null>(null);
+  // 추가 신청 대상 여부 판정 결과. null = 아직 계산 전(또는 계산 불필요).
+  const [extraEligible, setExtraEligible] = useState<boolean | null>(null);
+  const [extraTotal, setExtraTotal] = useState<number | null>(null);
+  // 해당 분기의 추첨 탈락 건수. 추가 신청 대상 판정 기준.
+  const [extraLost, setExtraLost] = useState<number | null>(null);
+  const [isCheckingExtra, setIsCheckingExtra] = useState(false);
+  // 신청·삭제가 실제로 일어났을 때만 올린다. 달을 넘길 때마다 분기 합계를
+  // 다시 계산하지 않으려고 specialMap 대신 이 값을 의존성으로 쓴다.
+  const [writeSeq, setWriteSeq] = useState(0);
 
-  const isFrozen = useMemo(() => {
+  // 1차 마감이 지났는지. 마감 미설정이면 항상 열려 있다.
+  const isPastFreeze = useMemo(() => {
     if (!requestFreezeDate) return false;
     const todayStr = format(new Date(), "yyyy-MM-dd");
     return todayStr > requestFreezeDate;
   }, [requestFreezeDate]);
+
+  // 추가 신청 기간(달력상)에 들어와 있는지. 대상자인지는 별도 계산이 필요하다.
+  const inExtraWindow = useMemo(() => {
+    if (!isPastFreeze) return false;
+    if (!extraDeadline || extraYear == null || extraQuarter == null)
+      return false;
+    return format(new Date(), "yyyy-MM-dd") <= extraDeadline;
+  }, [isPastFreeze, extraDeadline, extraYear, extraQuarter]);
+
+  // 추가 신청 기간일 때만 본인 분기 합계를 계산한다. 평상시에는 분기 RPC(3회)를
+  // 부르지 않는다. 판정 전에는 닫힌 것으로 취급해 신청이 새지 않게 한다.
+  useEffect(() => {
+    if (!inExtraWindow || !employee || extraYear == null || extraQuarter == null) {
+      setExtraEligible(null);
+      setExtraTotal(null);
+      setExtraLost(null);
+      return;
+    }
+    let cancelled = false;
+    setIsCheckingExtra(true);
+    fetchQuarterTotals(extraYear, extraQuarter, employee.staff_id)
+      .then((totals) => {
+        if (cancelled) return;
+        const mine = totals.get(employee.staff_id) ?? emptyQuarterTotals();
+        setExtraTotal(quarterTotal(mine));
+        setExtraLost(mine.lostCount);
+        // 추첨에서 떨어진 직원만 대상이다. 합계가 24 가 아니어도 탈락 이력이
+        // 없으면(애초에 덜 신청한 경우 등) 추가 기간에 열어주지 않는다.
+        setExtraEligible(mine.lostCount > 0);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // 계산에 실패하면 열어주지 않는다(닫힌 쪽이 안전).
+        setExtraEligible(false);
+        setExtraTotal(null);
+        setExtraLost(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsCheckingExtra(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // writeSeq 가 오르면(신청·삭제 직후) 합계를 다시 계산해야
+    // 24 를 채운 즉시 닫힌다.
+  }, [inExtraWindow, employee, extraYear, extraQuarter, writeSeq]);
+
+  const phase: RequestPhase = useMemo(() => {
+    if (!isPastFreeze) return "open";
+    if (!inExtraWindow) return "closed";
+    return extraEligible === true ? "extra" : "closed";
+  }, [isPastFreeze, inExtraWindow, extraEligible]);
+
+  // 추첨에서 떨어진 직원은 추가 기간에 신청·삭제를 자유롭게 한다 —
+  // 떨어진 자리를 다시 잡는 과정에서 날짜를 바꿔야 하기 때문이다.
+  const canRegister = phase === "open" || phase === "extra";
+  const canDelete = phase === "open" || phase === "extra";
 
   const grid = useMemo(() => getCalendarGrid(monthValue), [monthValue]);
 
@@ -161,7 +238,9 @@ export function UserCalendar() {
           fetchScheduleByRange(padded.start, padded.end),
           supabase
             .from("special_schedules")
-            .select("id, staff_id, target_date, record_type")
+            // created_at 은 추가 신청 기간의 삭제 허용 판정에 쓴다
+            // (1차 마감 후 새로 넣은 신청만 지울 수 있다).
+            .select("id, staff_id, target_date, record_type, created_at")
             .gte("target_date", start)
             .lte("target_date", end)
             .order("target_date", { ascending: true }),
@@ -173,7 +252,7 @@ export function UserCalendar() {
             .lte("locdate", padded.end),
           supabase
             .from("app_settings")
-            .select("request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
+            .select("request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, extra_request_deadline, extra_request_year, extra_request_quarter")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -186,8 +265,14 @@ export function UserCalendar() {
         jigeun_day_turns: string | null;
         jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
+        extra_request_deadline: string | null;
+        extra_request_year: number | null;
+        extra_request_quarter: number | null;
       } | null;
       setRequestFreezeDate(settings?.request_freeze_date ?? null);
+      setExtraDeadline(settings?.extra_request_deadline ?? null);
+      setExtraYear(settings?.extra_request_year ?? null);
+      setExtraQuarter(settings?.extra_request_quarter ?? null);
       setWeekendHolidayTurns(
         settings ? parseTurnsText(settings.weekend_holiday_turns) : DEFAULT_WEEKEND_HOLIDAY_TURNS
       );
@@ -381,7 +466,29 @@ export function UserCalendar() {
         </span>
       </div>
 
-      {isFrozen && (
+      {isPastFreeze && isCheckingExtra && (
+        <p className="mx-2 mb-2 rounded border bg-muted/50 px-3 py-2 text-center text-xs font-medium text-muted-foreground">
+          추가 신청 대상 여부를 확인하는 중입니다…
+        </p>
+      )}
+
+      {phase === "extra" && (
+        <p className="mx-2 mb-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-center text-xs font-medium text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+          추가 신청 기간입니다(~{extraDeadline}). {extraYear}년 {extraQuarter}
+          분기 추첨에서 <b>{extraLost}건</b>이 탈락해 신청이 다시 열려
+          있습니다. 떨어진 날짜 대신 다른 날로 <b>신청·삭제를 자유롭게</b> 하실
+          수 있습니다
+          {extraTotal != null && (
+            <>
+              {" "}
+              (현재 분기 휴무 합계 {extraTotal}개 / 목표 {QUARTER_TARGET}개)
+            </>
+          )}
+          .
+        </p>
+      )}
+
+      {phase === "closed" && !isCheckingExtra && (
         <p className="mx-2 mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           관리자가 지정한 신청 마감일({requestFreezeDate})이 지났습니다.
           지근/지휴 신청·삭제가 제한됩니다.
@@ -542,10 +649,17 @@ export function UserCalendar() {
         }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
-        isFrozen={isFrozen}
+        phase={phase}
+        canRegister={canRegister}
+        canDelete={canDelete}
         freezeDate={requestFreezeDate}
+        extraDeadline={extraDeadline}
         onClose={() => setSelectedDate(null)}
-        onChanged={fetchData}
+        onChanged={() => {
+          fetchData();
+          // 분기 합계가 바뀌었으므로 추가 신청 대상 판정을 다시 돌린다.
+          setWriteSeq((n) => n + 1);
+        }}
       />
     </div>
   );
