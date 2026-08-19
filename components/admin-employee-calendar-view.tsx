@@ -9,12 +9,14 @@ import type {
   SpecialSchedule,
   HolidayTurnRule,
   JigeunTurnSettings,
+  JigeunCaps,
   LotteryStatus,
 } from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
+  DEFAULT_JIGEUN_CAPS,
   parseTurnsText,
   parseHolidayTurnRulesText,
   getJigeunKind,
@@ -26,6 +28,8 @@ import {
   getDayColorClass,
   getTurnColorClass,
   getDayName,
+  getPositionCap,
+  countJigeunSlots,
   applyHolidayTurnRules,
   applyHolidayTurnRulesByStaffKey,
   padDateRange,
@@ -75,7 +79,14 @@ export function AdminEmployeeCalendarView({
   const [allEntriesMap, setAllEntriesMap] = useState<Map<string, DayEntry[]>>(
     new Map()
   );
+  // 정원 카운트 전용 맵. allEntriesMap 은 화면에 동료 이름을 띄우지 않으려고
+  // 대상 직원 것만 담으므로 정원을 셀 수 없다. 이쪽은 같은 직책 전원을 담는다.
+  const [slotEntriesMap, setSlotEntriesMap] = useState<Map<string, DayEntry[]>>(
+    new Map()
+  );
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
+  // 요일/공휴일별 지근 정원. 관리자에게는 표시만 하고 등록을 막지는 않는다.
+  const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
   const [weekendHolidayTurns, setWeekendHolidayTurns] = useState<string[]>(
     DEFAULT_WEEKEND_HOLIDAY_TURNS
   );
@@ -140,6 +151,24 @@ export function AdminEmployeeCalendarView({
     jigeunTurns,
   ]);
 
+  // 날짜별 지근 정원 현황(대상 직원의 직책 기준). 관리자가 날짜를 고르기 전에
+  // 어느 날이 이미 찼는지 보이게 하는 것이 목적이라, 그리드에 그려지는 날짜를
+  // 전부 돌아야 한다 — slotEntriesMap 만 돌면 신청이 없는 날(0/4)이 빠진다.
+  //
+  // isLoading 중에는 holidays 가 아직 비어 있어 공휴일이 평일 정원으로 잘못
+  // 계산되므로 판정을 보류한다(빈 맵 → 뱃지 숨김).
+  const slotByDate = useMemo(() => {
+    const m = new Map<string, { cap: number; used: number }>();
+    if (isLoading) return m;
+    for (const date of grid) {
+      m.set(date, {
+        cap: getPositionCap(date, holidays, caps),
+        used: countJigeunSlots(slotEntriesMap.get(date) ?? []),
+      });
+    }
+    return m;
+  }, [grid, isLoading, holidays, caps, slotEntriesMap]);
+
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -168,7 +197,7 @@ export function AdminEmployeeCalendarView({
             .lte("locdate", padded.end),
           supabase
             .from("app_settings")
-            .select("weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules")
+            .select("weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -180,7 +209,21 @@ export function AdminEmployeeCalendarView({
         jigeun_day_turns: string | null;
         jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
+        jigeun_cap_weekday: number;
+        jigeun_cap_saturday: number;
+        jigeun_cap_sunday: number;
+        jigeun_cap_holiday: number;
       } | null;
+      setCaps(
+        settings
+          ? {
+              weekday: settings.jigeun_cap_weekday,
+              saturday: settings.jigeun_cap_saturday,
+              sunday: settings.jigeun_cap_sunday,
+              holiday: settings.jigeun_cap_holiday,
+            }
+          : DEFAULT_JIGEUN_CAPS
+      );
       setWeekendHolidayTurns(
         settings
           ? parseTurnsText(settings.weekend_holiday_turns)
@@ -275,28 +318,46 @@ export function AdminEmployeeCalendarView({
         }
       }
 
-      // 관리자가 직원 시점으로 보는 화면이므로 동료 신청은 숨기고
-      // 해당 직원 본인의 지근/지휴만 표시한다.
+      // aMap: 화면 표시용. 관리자가 직원 시점으로 보는 화면이므로 동료 신청은
+      //       숨기고 해당 직원 본인의 지근/지휴만 담는다.
+      // slotMap: 정원 카운트용. 정원은 직책별로 따로 적용되므로 대상 직원과
+      //          같은 직책인 전원을 담는다(countJigeunSlots 가 탈락 건은 알아서 뺀다).
       const aMap = new Map<string, DayEntry[]>();
+      const slotMap = new Map<string, DayEntry[]>();
       for (const row of list) {
-        if (row.staff_id !== staff.staff_id) continue;
+        const isSelf = row.staff_id === staff.staff_id;
         const emp = empMap.get(row.staff_id);
-        const position = emp?.staff_position ?? staff.staff_position;
+        // 본인은 coworker_list 조회가 비어도 prop 의 직책을 믿을 수 있지만,
+        // 동료는 직책을 모르면 정원 카운트에 넣을 수 없다.
+        const position = isSelf
+          ? emp?.staff_position ?? staff.staff_position
+          : emp?.staff_position;
+        if (!isSelf && position !== staff.staff_position) continue;
         const entry: DayEntry = {
           id: row.id,
           staff_id: row.staff_id,
           staff_name: emp?.staff_name ?? `(미상 ${row.staff_id})`,
-          staff_position: position,
+          staff_position: position ?? staff.staff_position,
           record_type: row.record_type,
           regularTurn:
             displayByStaff.get(`${row.staff_id}|${row.target_date}`) ?? null,
           lottery_status: row.lottery_status ?? null,
         };
+
+        // 본인이라도 직책이 다르게 조회되면(데이터 불일치) 정원에서는 뺀다.
+        if (entry.staff_position === staff.staff_position) {
+          const slots = slotMap.get(row.target_date);
+          if (slots) slots.push(entry);
+          else slotMap.set(row.target_date, [entry]);
+        }
+
+        if (!isSelf) continue;
         const arr = aMap.get(row.target_date);
         if (arr) arr.push(entry);
         else aMap.set(row.target_date, [entry]);
       }
       setAllEntriesMap(aMap);
+      setSlotEntriesMap(slotMap);
 
       setHolidays(holidaySet);
     } catch (err) {
@@ -396,6 +457,11 @@ export function AdminEmployeeCalendarView({
               : "";
             // 배경색과 같은 값(연휴 치환 후 turn)으로 판정해야 색과 배지가 어긋나지 않는다.
             const jigeunKind = turn ? getJigeunKind(turn, jigeunTurns) : null;
+            // 정원 경계는 관리자 달력과 같은 규칙을 쓴다 — 마감은 >=, 초과는 >.
+            // (admin-calendar 의 overCapByDate / day-modal 의 jigeunFull 참고)
+            const slot = slotByDate.get(date);
+            const slotFull = !!slot && slot.used >= slot.cap;
+            const slotOver = !!slot && slot.used > slot.cap;
             return (
               <button
                 key={date}
@@ -406,8 +472,16 @@ export function AdminEmployeeCalendarView({
                   turnBgClass.includes("bg-red") &&
                     "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-800",
                   turnBgClass.includes("bg-sky") &&
-                    "bg-sky-100 dark:bg-sky-900/40 border-sky-300 dark:border-sky-800"
+                    "bg-sky-100 dark:bg-sky-900/40 border-sky-300 dark:border-sky-800",
+                  slotOver && "ring-2 ring-amber-500"
                 )}
+                title={
+                  slot
+                    ? `${staff.staff_position} 지근 정원 ${slot.used}/${slot.cap}${
+                        slotOver ? " (초과)" : slotFull ? " (마감)" : ""
+                      }`
+                    : undefined
+                }
               >
                 <span
                   className={cn(
@@ -433,6 +507,20 @@ export function AdminEmployeeCalendarView({
                   </span>
                 )}
                 <div className="mt-auto flex flex-col gap-0.5">
+                  {slot && (
+                    <span
+                      className={cn(
+                        "text-[9px] font-bold rounded px-1 text-center tabular-nums",
+                        slotOver
+                          ? "bg-amber-200 text-amber-900 dark:bg-amber-900/60 dark:text-amber-200"
+                          : slotFull
+                            ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
+                            : "text-muted-foreground"
+                      )}
+                    >
+                      {slot.used}/{slot.cap}
+                    </span>
+                  )}
                   {entries.map((e) => {
                     const isSelf = e.staff_id === staff.staff_id;
                     return (
@@ -485,6 +573,10 @@ export function AdminEmployeeCalendarView({
         phase="open"
         canRegister
         canDelete
+        // 정원은 현황과 경고만 보여주고 등록은 막지 않는다 — 관리자가 정원을
+        // 넘겨 배치해야 하는 예외가 있고, 그 판단은 관리자 몫이다.
+        jigeunSlot={selectedDate ? slotByDate.get(selectedDate) ?? null : null}
+        enforceJigeunCap={false}
         freezeDate={null}
         extraDeadline={null}
         onClose={() => setSelectedDate(null)}

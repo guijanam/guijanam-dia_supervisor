@@ -35,9 +35,11 @@ interface DayModalProps {
   canRegister: boolean;
   canDelete: boolean;
   // 그 날짜의 지근 정원 현황. 정원이 차면 지근 신청을 막는다.
-  // null/미전달이면 판정하지 않는다 — 로딩 중이거나, 관리자 대리 등록
-  // 화면처럼 전체 신청 내역이 없어 정원을 셀 수 없는 경우.
+  // null/미전달이면 판정하지 않는다 — 로딩 중이라 정원을 셀 수 없는 경우.
   jigeunSlot?: { cap: number; used: number } | null;
+  // 정원이 찼을 때 지근 등록을 실제로 막을지. false 면 현황·경고만 보여주고
+  // 버튼은 계속 눌린다 — 관리자 대리 등록 화면용.
+  enforceJigeunCap?: boolean;
   freezeDate: string | null;
   extraDeadline: string | null;
   onClose: () => void;
@@ -55,6 +57,7 @@ export function DayModal({
   canRegister,
   canDelete,
   jigeunSlot,
+  enforceJigeunCap = true,
   freezeDate,
   extraDeadline,
   onClose,
@@ -72,7 +75,10 @@ export function DayModal({
   const alreadyJigeun = existing?.record_type === "지근";
   const jigeunFull =
     !!jigeunSlot && !alreadyJigeun && jigeunSlot.used >= jigeunSlot.cap;
-  const canRegisterJigeun = canRegister && !jigeunFull;
+  // 관리자 대리 등록 화면(enforceJigeunCap=false)은 정원을 '보여주되 막지는'
+  // 않는다 — 관리자는 신청 마감일도 무시하는 권한이라 정원을 넘겨 배치해야 하는
+  // 예외가 있고, 그 판단은 관리자에게 맡긴다.
+  const canRegisterJigeun = canRegister && (!enforceJigeunCap || !jigeunFull);
 
   const register = async (recordType: RecordType) => {
     if (!canRegister) return;
@@ -236,7 +242,10 @@ export function DayModal({
         {jigeunFull && canRegister && (
           <p className="text-xs text-destructive text-center font-medium">
             이 날은 {employee.staff_position} 지근 정원({jigeunSlot?.cap}명)이
-            모두 찼습니다. 정원이 남은 다른 날짜를 선택해 주세요.
+            모두 찼습니다.{" "}
+            {enforceJigeunCap
+              ? "정원이 남은 다른 날짜를 선택해 주세요."
+              : "그래도 등록하면 정원을 초과합니다."}
           </p>
         )}
 
@@ -246,7 +255,11 @@ export function DayModal({
             disabled={isSaving || !canRegisterJigeun}
             onClick={() => register("지근")}
             title={
-              jigeunFull ? "지근 정원이 모두 찼습니다" : undefined
+              jigeunFull
+                ? enforceJigeunCap
+                  ? "지근 정원이 모두 찼습니다"
+                  : "지근 정원이 모두 찼습니다 — 등록 시 정원 초과"
+                : undefined
             }
           >
             지근 신청
