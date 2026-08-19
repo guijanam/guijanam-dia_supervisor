@@ -5,6 +5,7 @@ import type {
   HolidayTurnRule,
   JigeunTurnSettings,
   RecordType,
+  LotteryStatus,
 } from "./types";
 import {
   DEFAULT_JIGEUN_CAPS,
@@ -110,6 +111,35 @@ export function getPositionCap(
   if (dayName === "토") return caps.saturday;
   if (dayName === "일") return caps.sunday;
   return caps.weekday;
+}
+
+// 정원 한 자리를 차지한 지근 신청인지.
+//
+// 추첨 탈락(lost)은 그 날 근무하지 않기로 확정된 건이므로 자리를 비운 것으로
+// 본다. 이 규칙 하나가 두 가지를 동시에 해결한다:
+//  - 추첨 직후 '정원 초과' 표시가 풀린다(5명 신청 → 당첨 4 + 탈락 1 = 4/4).
+//  - 그 날은 꽉 찬 상태가 되어 탈락자가 같은 날에 다시 신청하지 못한다.
+// 반대로 lost 를 포함해 세면, 정원이 줄었거나 당첨자가 삭제되어 실제로는
+// 자리가 비었는데도 영원히 막히게 된다.
+//
+// 주의: lottery_status 를 select 하지 않은 호출부에서는 undefined 가 되어
+// 모두 '자리 차지'로 계산된다(= 추첨 이전과 같은 동작).
+export function occupiesJigeunSlot(entry: {
+  record_type: RecordType;
+  lottery_status?: LotteryStatus | null;
+}): boolean {
+  return entry.record_type === "지근" && entry.lottery_status !== "lost";
+}
+
+// 그 날짜에서 정원을 차지한 지근 인원수.
+// entries 는 호출부에서 직책별로 걸러 넘긴다(정원은 직책별로 따로 적용된다).
+export function countJigeunSlots(
+  entries: Array<{
+    record_type: RecordType;
+    lottery_status?: LotteryStatus | null;
+  }>
+): number {
+  return entries.filter(occupiesJigeunSlot).length;
 }
 
 // isSubstituted: 운휴대기(연휴 짝 치환)가 적용된 칸이면 true.

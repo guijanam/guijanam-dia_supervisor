@@ -10,6 +10,8 @@ import type {
   HolidayTurnRule,
   JigeunTurnSettings,
   RequestPhase,
+  JigeunCaps,
+  LotteryStatus,
 } from "@/lib/types";
 import { QUARTER_TARGET } from "@/lib/quarter";
 import {
@@ -21,6 +23,7 @@ import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
+  DEFAULT_JIGEUN_CAPS,
   parseTurnsText,
   parseHolidayTurnRulesText,
   getJigeunKind,
@@ -32,6 +35,8 @@ import {
   getDayColorClass,
   getTurnColorClass,
   getDayName,
+  getPositionCap,
+  countJigeunSlots,
   applyHolidayTurnRules,
   applyHolidayTurnRulesByStaffKey,
   padDateRange,
@@ -60,6 +65,8 @@ export interface DayEntry {
   staff_position: string;
   record_type: RecordType;
   regularTurn: string | null;
+  // 지근 정원 카운트에서 탈락 건을 빼기 위해 필요하다(countJigeunSlots).
+  lottery_status: LotteryStatus | null;
 }
 
 export function UserCalendar() {
@@ -78,6 +85,8 @@ export function UserCalendar() {
     new Map()
   );
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
+  // 요일/공휴일별 지근 정원. 정원이 찬 날은 지근 신청을 막는다.
+  const [caps, setCaps] = useState<JigeunCaps>(DEFAULT_JIGEUN_CAPS);
   const [requestFreezeDate, setRequestFreezeDate] = useState<string | null>(
     null
   );
@@ -165,6 +174,26 @@ export function UserCalendar() {
     return extraEligible === true ? "extra" : "closed";
   }, [isPastFreeze, inExtraWindow, extraEligible]);
 
+  // 선택한 날짜의 지근 정원 현황(본인 직책 기준).
+  //
+  // 정원 차단은 추가 신청 기간(extra)에만 건다. 1차 신청(open)은 종전대로
+  // 정원을 넘겨 신청할 수 있어야 한다 — 초과분을 관리자가 추첨으로 거르는
+  // 것이 기존 운영이고, 여기서 막으면 추첨이 무의미해지고 선착순이 된다.
+  // 추가 기간에는 이미 추첨이 끝나 자리가 확정된 상태라 막는 것이 맞다.
+  //
+  // allEntriesMap 은 이미 본인과 같은 직책만 담고 있어(아래 fetchData 참고)
+  // 그대로 세면 그 직책의 정원 카운트가 된다.
+  // isLoading 중에는 holidays 가 아직 비어 있어 공휴일이 평일 정원으로
+  // 잘못 계산되므로 판정을 보류한다(null → 막지 않음).
+  const jigeunSlot = useMemo(() => {
+    if (!selectedDate || isLoading) return null;
+    if (phase !== "extra") return null;
+    return {
+      cap: getPositionCap(selectedDate, holidays, caps),
+      used: countJigeunSlots(allEntriesMap.get(selectedDate) ?? []),
+    };
+  }, [selectedDate, isLoading, phase, holidays, caps, allEntriesMap]);
+
   // 추첨에서 떨어진 직원은 추가 기간에 신청·삭제를 자유롭게 한다 —
   // 떨어진 자리를 다시 잡는 과정에서 날짜를 바꿔야 하기 때문이다.
   const canRegister = phase === "open" || phase === "extra";
@@ -240,7 +269,10 @@ export function UserCalendar() {
             .from("special_schedules")
             // created_at 은 추가 신청 기간의 삭제 허용 판정에 쓴다
             // (1차 마감 후 새로 넣은 신청만 지울 수 있다).
-            .select("id, staff_id, target_date, record_type, created_at")
+            // lottery_status 는 지근 정원 카운트에서 탈락 건을 빼는 데 쓴다.
+            .select(
+              "id, staff_id, target_date, record_type, created_at, lottery_status"
+            )
             .gte("target_date", start)
             .lte("target_date", end)
             .order("target_date", { ascending: true }),
@@ -252,7 +284,7 @@ export function UserCalendar() {
             .lte("locdate", padded.end),
           supabase
             .from("app_settings")
-            .select("request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, extra_request_deadline, extra_request_year, extra_request_quarter")
+            .select("request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, extra_request_deadline, extra_request_year, extra_request_quarter, jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday")
             .eq("id", 1)
             .maybeSingle(),
         ]);
@@ -268,7 +300,21 @@ export function UserCalendar() {
         extra_request_deadline: string | null;
         extra_request_year: number | null;
         extra_request_quarter: number | null;
+        jigeun_cap_weekday: number;
+        jigeun_cap_saturday: number;
+        jigeun_cap_sunday: number;
+        jigeun_cap_holiday: number;
       } | null;
+      setCaps(
+        settings
+          ? {
+              weekday: settings.jigeun_cap_weekday,
+              saturday: settings.jigeun_cap_saturday,
+              sunday: settings.jigeun_cap_sunday,
+              holiday: settings.jigeun_cap_holiday,
+            }
+          : DEFAULT_JIGEUN_CAPS
+      );
       setRequestFreezeDate(settings?.request_freeze_date ?? null);
       setExtraDeadline(settings?.extra_request_deadline ?? null);
       setExtraYear(settings?.extra_request_year ?? null);
@@ -331,6 +377,7 @@ export function UserCalendar() {
         staff_id: number;
         target_date: string;
         record_type: RecordType;
+        lottery_status: LotteryStatus | null;
       }>;
 
       // 본인 신청 내역 맵 (기존 기능 유지)
@@ -381,6 +428,7 @@ export function UserCalendar() {
           record_type: row.record_type,
           regularTurn:
             displayByStaff.get(`${row.staff_id}|${row.target_date}`) ?? null,
+          lottery_status: row.lottery_status ?? null,
         };
         const arr = aMap.get(row.target_date);
         if (arr) arr.push(entry);
@@ -652,6 +700,7 @@ export function UserCalendar() {
         phase={phase}
         canRegister={canRegister}
         canDelete={canDelete}
+        jigeunSlot={jigeunSlot}
         freezeDate={requestFreezeDate}
         extraDeadline={extraDeadline}
         onClose={() => setSelectedDate(null)}

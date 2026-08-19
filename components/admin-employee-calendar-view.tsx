@@ -9,6 +9,7 @@ import type {
   SpecialSchedule,
   HolidayTurnRule,
   JigeunTurnSettings,
+  LotteryStatus,
 } from "@/lib/types";
 import {
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
@@ -155,7 +156,7 @@ export function AdminEmployeeCalendarView({
           fetchScheduleByRange(padded.start, padded.end),
           supabase
             .from("special_schedules")
-            .select("id, staff_id, target_date, record_type")
+            .select("id, staff_id, target_date, record_type, lottery_status")
             .gte("target_date", start)
             .lte("target_date", end)
             .order("target_date", { ascending: true }),
@@ -239,6 +240,7 @@ export function AdminEmployeeCalendarView({
         staff_id: number;
         target_date: string;
         record_type: RecordType;
+        lottery_status: LotteryStatus | null;
       }>;
 
       const sMap = new Map<string, SpecialSchedule>();
@@ -288,6 +290,7 @@ export function AdminEmployeeCalendarView({
           record_type: row.record_type,
           regularTurn:
             displayByStaff.get(`${row.staff_id}|${row.target_date}`) ?? null,
+          lottery_status: row.lottery_status ?? null,
         };
         const arr = aMap.get(row.target_date);
         if (arr) arr.push(entry);

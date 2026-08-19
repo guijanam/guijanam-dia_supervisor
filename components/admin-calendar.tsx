@@ -29,6 +29,7 @@ import {
   getDayExcelColor,
   getDayName,
   getPositionCap,
+  countJigeunSlots,
   applyHolidayTurnRulesByStaffKey,
   padDateRange,
   getTurnDisplay,
@@ -81,10 +82,10 @@ interface SpecialEntry {
   lottery_at: string | null;
 }
 
+// 그 직책에서 정원을 차지한 지근 인원수. 추첨 탈락(lost)은 제외된다
+// (countJigeunSlots 주석 참고) — 추첨을 돌리면 초과 표시가 풀린다.
 function countJigeun(entries: SpecialEntry[], pos: Position): number {
-  return entries.filter(
-    (e) => e.staff_position === pos && e.record_type === "지근"
-  ).length;
+  return countJigeunSlots(entries.filter((e) => e.staff_position === pos));
 }
 
 export function AdminCalendar() {
@@ -1085,9 +1086,9 @@ export function AdminCalendar() {
                 const cap = selectedDate
                   ? getPositionCap(selectedDate, holidays, caps)
                   : caps.weekday;
-                const jigeunCount = group.filter(
-                  (e) => e.record_type === "지근"
-                ).length;
+                // 탈락(lost)은 자리를 비운 것으로 세므로, 추첨을 돌리면
+                // 여기 숫자가 정원 이하로 내려가며 초과 표시·추첨 버튼이 사라진다.
+                const jigeunCount = countJigeunSlots(group);
                 const isOver = jigeunCount > cap;
                 const drawn = group.some((e) => e.lottery_status != null);
                 return (

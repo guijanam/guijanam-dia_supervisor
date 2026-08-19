@@ -34,6 +34,10 @@ interface DayModalProps {
   phase: RequestPhase;
   canRegister: boolean;
   canDelete: boolean;
+  // 그 날짜의 지근 정원 현황. 정원이 차면 지근 신청을 막는다.
+  // null/미전달이면 판정하지 않는다 — 로딩 중이거나, 관리자 대리 등록
+  // 화면처럼 전체 신청 내역이 없어 정원을 셀 수 없는 경우.
+  jigeunSlot?: { cap: number; used: number } | null;
   freezeDate: string | null;
   extraDeadline: string | null;
   onClose: () => void;
@@ -50,6 +54,7 @@ export function DayModal({
   phase,
   canRegister,
   canDelete,
+  jigeunSlot,
   freezeDate,
   extraDeadline,
   onClose,
@@ -60,8 +65,18 @@ export function DayModal({
 
   if (!date) return null;
 
+  // 이미 이 날 지근인 사람은 본인이 카운트에 포함되어 있으므로 정원 판정에서
+  // 뺀다 — upsert 라 다시 눌러도 인원이 늘지 않는데, 빼지 않으면 자기 자신
+  // 때문에 자기가 막힌다. 반대로 지휴에서 지근으로 바꾸는 경우는 인원이
+  // +1 되므로 정상적으로 막혀야 한다.
+  const alreadyJigeun = existing?.record_type === "지근";
+  const jigeunFull =
+    !!jigeunSlot && !alreadyJigeun && jigeunSlot.used >= jigeunSlot.cap;
+  const canRegisterJigeun = canRegister && !jigeunFull;
+
   const register = async (recordType: RecordType) => {
     if (!canRegister) return;
+    if (recordType === "지근" && !canRegisterJigeun) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -141,7 +156,14 @@ export function DayModal({
           <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
             <span className="text-sm font-semibold">전체 신청 내역</span>
             <span className="text-xs text-muted-foreground">
-              지근 {allEntries.filter((e) => e.record_type === "지근").length}
+              지근{" "}
+              {jigeunSlot ? (
+                <span className={cn(jigeunFull && "text-destructive font-bold")}>
+                  {jigeunSlot.used}/{jigeunSlot.cap}
+                </span>
+              ) : (
+                allEntries.filter((e) => e.record_type === "지근").length
+              )}
               {" · "}
               지휴 {allEntries.filter((e) => e.record_type === "지휴").length}
               {" · "}총 {allEntries.length}건
@@ -211,11 +233,21 @@ export function DayModal({
           </p>
         )}
 
+        {jigeunFull && canRegister && (
+          <p className="text-xs text-destructive text-center font-medium">
+            이 날은 {employee.staff_position} 지근 정원({jigeunSlot?.cap}명)이
+            모두 찼습니다. 정원이 남은 다른 날짜를 선택해 주세요.
+          </p>
+        )}
+
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant={existing?.record_type === "지근" ? "default" : "outline"}
-            disabled={isSaving || !canRegister}
+            disabled={isSaving || !canRegisterJigeun}
             onClick={() => register("지근")}
+            title={
+              jigeunFull ? "지근 정원이 모두 찼습니다" : undefined
+            }
           >
             지근 신청
           </Button>
