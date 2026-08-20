@@ -24,6 +24,7 @@ import { DocumentAdminContent } from "@/components/document-admin";
 import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
 import { RequestsPanel } from "@/components/admin-panels/requests-panel";
 import { PinResetPanel } from "@/components/admin-panels/pin-reset-panel";
+import { LotteryLosersPanel } from "@/components/admin-panels/lottery-losers-panel";
 import { ReferenceEditPanel } from "@/components/admin-panels/reference-edit-panel";
 import { WorkPatternPanel } from "@/components/admin-panels/work-pattern-panel";
 import {
@@ -35,10 +36,12 @@ import {
   Users,
   ClipboardList,
   Repeat,
+  PhoneCall,
 } from "lucide-react";
 
 type AdminPage =
   | "requests"
+  | "losers"
   | "announce"
   | "document"
   | "pin"
@@ -185,6 +188,12 @@ export function AdminDashboard() {
             onClick={() => setPage("requests")}
           />
           <SidebarItem
+            icon={PhoneCall}
+            label="추첨 탈락자"
+            active={page === "losers"}
+            onClick={() => setPage("losers")}
+          />
+          <SidebarItem
             icon={Megaphone}
             label="공지"
             active={page === "announce"}
@@ -240,6 +249,7 @@ export function AdminDashboard() {
               }}
             />
           )}
+          {page === "losers" && <LotteryLosersPanel />}
           {page === "announce" && (
             <div className="flex flex-1 flex-col min-w-0 gap-3 p-4 overflow-auto">
               <div>
