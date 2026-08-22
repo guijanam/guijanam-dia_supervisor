@@ -28,6 +28,21 @@ export function quarterRange(
   return { start: format(start, "yyyy-MM-dd"), end: format(end, "yyyy-MM-dd") };
 }
 
+/**
+ * yyyy-MM 이 분기의 마지막 달(3·6·9·12월)이면 그 분기를, 아니면 null 을 돌려준다.
+ *
+ * 분기 병합 근무표는 분기가 다 끝난 시점에만 의미가 있으므로, 관리자 화면의
+ * '분기 Excel' 버튼을 이 판정으로만 노출한다.
+ */
+export function quarterEndOf(
+  monthValue: string
+): { year: number; quarter: number } | null {
+  const [year, month] = monthValue.split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  const q = QUARTERS.find((x) => x.startMonth + 2 === month);
+  return q ? { year, quarter: q.value } : null;
+}
+
 // get_schedule_by_range RPC 는 서버에서 10,000행으로 잘립니다(staff_id 오름차순).
 // 분기 전체(약 23,000행)를 한 번에 부르면 낮은 staff_id(기관사)가 한도를
 // 다 차지해 높은 staff_id(차장)가 누락됩니다. 그래서 월 단위(약 8,000행)로

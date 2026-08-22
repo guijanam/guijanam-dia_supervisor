@@ -19,8 +19,6 @@ import {
   DEFAULT_HOLIDAY_TURN_RULES,
   parseTurnsText,
   parseHolidayTurnRulesText,
-  getJigeunKind,
-  getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
   getCalendarGrid,
@@ -34,8 +32,13 @@ import {
   padDateRange,
   getTurnDisplay,
   getTurnExcelFill,
-  isHueTurnOnDate,
 } from "@/lib/schedule-utils";
+import {
+  buildMonthMaps,
+  buildEmployeeMonthCells,
+  monthRestTotal,
+} from "@/lib/schedule-excel";
+import { quarterEndOf, quarterMonths } from "@/lib/quarter";
 import { useMonthState } from "@/lib/use-month-state";
 import { lostWarningSuffix } from "@/lib/lottery-warning";
 import { startOfMonth, endOfMonth, format } from "date-fns";
@@ -122,6 +125,9 @@ export function AdminCalendar() {
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
+  const [quarterExportBusy, setQuarterExportBusy] = useState(false);
+  // 분기 마지막 달(3·6·9·12월)에만 분기 병합 엑셀 버튼을 노출한다.
+  const quarterInfo = useMemo(() => quarterEndOf(monthValue), [monthValue]);
 
   // 직원 검색 → 개인 뷰 전환 상태
   const [staffSearch, setStaffSearch] = useState("");
@@ -539,88 +545,45 @@ export function AdminCalendar() {
     }
   };
 
-  // 월간 근무표 엑셀: 직책별 시트, 행=직원, 열=해당 월 날짜.
-  // 각 칸은 정규 교번에 신청 구분을 병기한다. 지근은 한 줄(예: 58(지근)),
-  // 지휴는 운휴대기와 같이 두 줄(원래근무 / 지휴).
-  const exportExcel = async () => {
-    const [year, month] = monthValue.split("-").map(Number);
-    const monthStart = startOfMonth(new Date(year, month - 1));
-    const monthEnd = endOfMonth(monthStart);
-    const start = format(monthStart, "yyyy-MM-dd");
-    const end = format(monthEnd, "yyyy-MM-dd");
-    // 월 경계에 걸친 연휴 짝을 판정하려면 앞뒤 하루가 더 필요하다.
-    const padded = padDateRange(start, end);
-
-    const [exportScheduleRows, specialResult, holidayResult, empResult] =
-      await Promise.all([
-        fetchScheduleByRange(padded.start, padded.end),
-        supabase
-          .from("special_schedules")
-          .select("staff_id, target_date, record_type")
-          .gte("target_date", start)
-          .lte("target_date", end),
-        supabase
-          .from("holidays")
-          .select("locdate")
-          .eq("is_holiday", "Y")
-          .gte("locdate", padded.start)
-          .lte("locdate", padded.end),
-        supabase
-          .from("coworker_list")
-          .select("staff_id, staff_name, staff_position, employee_number")
-          .in("staff_position", [...POSITIONS])
-          .order("staff_name", { ascending: true }),
-      ]);
-
-    if (specialResult.error) throw specialResult.error;
-    if (empResult.error) throw empResult.error;
-
-    const holidaySet = new Set<string>(
-      (holidayResult.data ?? []).map((h: { locdate: string }) => h.locdate)
-    );
-
-    const allDates: string[] = [];
-    for (
-      let d = monthStart;
-      d <= monthEnd;
-      d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
-    ) {
-      allDates.push(format(d, "yyyy-MM-dd"));
-    }
-
-    // (staff_id|날짜) → 원래 교번. 통계는 이 원본을 쓰고, 표시는 치환본을 쓴다.
-    // 월 밖(앞뒤 하루)의 근무는 짝 판정용 context 로만 쓰고 맵에는 넣지 않는다.
-    const regularByStaff = new Map<string, string>();
-    const contextByStaff = new Map<string, string>();
-    for (const row of exportScheduleRows) {
-      const dateStr = row.date ? format(new Date(row.date), "yyyy-MM-dd") : "";
-      if (!dateStr) continue;
-      const key = `${row.staff_id}|${dateStr}`;
-      if (dateStr >= start && dateStr <= end) regularByStaff.set(key, row.turn);
-      else contextByStaff.set(key, row.turn);
-    }
-    const displayByStaff = applyHolidayTurnRulesByStaffKey(
-      regularByStaff,
-      holidaySet,
-      holidayTurnRules,
-      contextByStaff
-    );
-
-    const specialByStaff = new Map<string, RecordType>();
-    for (const row of (specialResult.data ?? []) as Array<{
-      staff_id: number;
-      target_date: string;
-      record_type: RecordType;
-    }>) {
-      specialByStaff.set(`${row.staff_id}|${row.target_date}`, row.record_type);
-    }
-
-    const employees = (empResult.data ?? []) as Array<{
+  // 근무표 대상 직원(기관사·차장) 명단. 월간·분기 엑셀이 공유한다.
+  const fetchExportEmployees = async () => {
+    const { data, error } = await supabase
+      .from("coworker_list")
+      .select("staff_id, staff_name, staff_position, employee_number")
+      .in("staff_position", [...POSITIONS])
+      .order("staff_name", { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as Array<{
       staff_id: number;
       staff_name: string;
       staff_position: string;
       employee_number: string | null;
     }>;
+  };
+
+  // 완성된 워크북을 파일로 내려받는다.
+  const downloadWorkbook = async (wb: ExcelJS.Workbook, filename: string) => {
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(
+      new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // 월간 근무표 엑셀: 직책별 시트, 행=직원, 열=해당 월 날짜.
+  // 셀 텍스트·집계 규칙은 lib/schedule-excel 에서 분기 엑셀과 공유한다.
+  const exportExcel = async () => {
+    const [maps, employees] = await Promise.all([
+      buildMonthMaps(monthValue, holidayTurnRules),
+      fetchExportEmployees(),
+    ]);
+    const { dates: allDates, holidaySet } = maps;
 
     const wb = new ExcelJS.Workbook();
 
@@ -650,77 +613,17 @@ export function AdminCalendar() {
 
       for (const emp of employees.filter((e) => e.staff_position === pos)) {
         // 총휴무 = 휴무 + 운휴 + 지휴 − 지근 (user-calendar 의 '총휴'와 동일 공식).
-        // 집계는 연휴 치환 전 원본 교번 기준.
-        let hueCount = 0;
-        let weekendTurnCount = 0;
-        let jigeunCount = 0;
-        let jihyuCount = 0;
-
-        const cells = allDates.map((date) => {
-          const key = `${emp.staff_id}|${date}`;
-          const rawTurn = regularByStaff.get(key);
-          // 휴무는 운휴대기 치환 후 값으로 판정한다(화면·달력 집계와 동일).
-          // 운휴는 계속 원본 근무번호 기준.
-          // 지정근무 번호(예: 휴(지))는 화면에서 하늘색이므로 휴무에서 제외한다.
-          let isHue = false;
-          let isWeekendTurn = false;
-          if (rawTurn) {
-            isHue = isHueTurnOnDate(
-              key,
-              regularByStaff,
-              displayByStaff,
-              jigeunTurns
-            );
-            if (isHue) hueCount++;
-            const dayName = getDayName(date);
-            const isHoliday =
-              dayName === "토" || dayName === "일" || holidaySet.has(date);
-            isWeekendTurn = isHoliday && weekendHolidayTurns.includes(rawTurn);
-            if (isWeekendTurn) weekendTurnCount++;
-          }
-
-          const special = specialByStaff.get(key);
-          if (special === "지근") jigeunCount++;
-          else if (special === "지휴") jihyuCount++;
-
-          const turn = displayByStaff.get(key) ?? "";
-          // 운휴대기 치환 칸은 원래근무(윗줄)/대치근무(아랫줄) 두 줄로 적는다.
-          const substituted =
-            getTurnDisplay(key, regularByStaff, displayByStaff)?.substituted ??
-            null;
-          const turnText = substituted ? `${rawTurn}\n${substituted}` : turn;
-          // 지정근무면 근무번호 뒤에 지(주)/지(야)를 덧붙인다. 신청(지근/지휴)이
-          // 있는 날은 그 신청 구분을 우선 표시한다.
-          const kind = turn ? getJigeunKind(turn, jigeunTurns) : null;
-          // 지휴 신청 칸은 운휴대기와 같은 방식으로 원래근무(윗줄)/지휴(아랫줄)
-          // 두 줄로 적는다. 지근은 기존처럼 한 줄로 병기한다(예: 58(지근)).
-          const text = !special
-            ? kind
-              ? `${turnText} ${getJigeunBadgeLabel(kind)}`
-              : turnText
-            : special === "지휴"
-              ? turnText
-                ? `${turnText}\n${special}`
-                : special
-              : turnText
-                ? `${turnText}(${special})`
-                : special;
-          return {
-            text,
-            isRest: isHue || isWeekendTurn,
-            isSubstituted: substituted != null,
-            // 지정근무 배경색 판정용(치환 후 값). 위 kind 계산과 같은 기준이라
-            // 배경색과 지(주)/지(야) 배지가 항상 일치한다.
-            turn,
-            // 사용자가 신청한 지근/지휴. 배경색에서 가장 우선한다.
-            special: special ?? null,
-          };
+        const { cells, totals } = buildEmployeeMonthCells({
+          staffId: emp.staff_id,
+          maps,
+          jigeunTurns,
+          weekendHolidayTurns,
         });
 
         const row = ws.addRow([
           emp.employee_number ?? "",
           emp.staff_name,
-          hueCount + weekendTurnCount + jihyuCount - jigeunCount,
+          monthRestTotal(totals),
           ...cells.map((c) => c.text),
         ]);
         // 운휴대기 칸은 두 줄이라 줄바꿈을 켠다.
@@ -751,17 +654,143 @@ export function AdminCalendar() {
       ws.views = [{ state: "frozen", xSplit: 3, ySplit: 1 }];
     }
 
-    const buf = await wb.xlsx.writeBuffer();
-    const url = URL.createObjectURL(
-      new Blob([buf], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      })
+    await downloadWorkbook(wb, `월간근무표_${monthValue}.xlsx`);
+  };
+
+  // 분기 병합 근무표 엑셀: 직책별 시트, 직원 1명 = 6행(월별 요일행 3 + 데이터행 3).
+  // 사번·이름·분기 총휴무는 그 6행에 걸쳐 세로 병합한다.
+  //
+  // 달마다 날짜 수·요일이 다르므로 1~31일 열을 공유하되 월 블록마다 요일 행을
+  // 따로 둔다. 30일까지인 달은 31일 칸이 빈칸이 된다.
+  const exportQuarterExcel = async () => {
+    if (!quarterInfo) return;
+    const { year, quarter } = quarterInfo;
+
+    // 분기 전체를 한 번에 부르면 RPC 행 수 한도에 걸리므로 월 단위로 나눠 받는다
+    // (lib/quarter.ts 의 quarterMonths 주석 참고).
+    const monthValues = quarterMonths(year, quarter).map((m) =>
+      m.start.slice(0, 7)
     );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `월간근무표_${monthValue}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const [monthMaps, employees] = await Promise.all([
+      Promise.all(monthValues.map((mv) => buildMonthMaps(mv, holidayTurnRules))),
+      fetchExportEmployees(),
+    ]);
+
+    // 열은 1~31일로 고정한다. 달마다 말일이 달라도 같은 열에 같은 '일' 이 온다.
+    const maxDays = Math.max(...monthMaps.map((m) => m.dates.length));
+    const dayNumbers = Array.from({ length: maxDays }, (_, i) => i + 1);
+    // 앞 5열: 사번·이름·총휴무갯수·월·월휴무
+    const FIXED_COLS = 5;
+
+    const wb = new ExcelJS.Workbook();
+
+    for (const pos of POSITIONS) {
+      const ws = wb.addWorksheet(pos);
+      ws.columns = [
+        { width: 12 },
+        { width: 12 },
+        { width: 11 },
+        { width: 7 },
+        { width: 8 },
+        ...dayNumbers.map(() => ({ width: 9 })),
+      ];
+
+      const headerRow = ws.addRow([
+        "사번",
+        "이름",
+        "총휴무갯수",
+        "월",
+        "월휴무",
+        ...dayNumbers.map((n) => `${n}일`),
+      ]);
+      headerRow.font = { bold: true };
+      headerRow.alignment = { horizontal: "center" };
+
+      for (const emp of employees.filter((e) => e.staff_position === pos)) {
+        const blockStart = ws.rowCount + 1;
+        let quarterTotal = 0;
+
+        monthMaps.forEach((maps, mi) => {
+          const { cells, totals } = buildEmployeeMonthCells({
+            staffId: emp.staff_id,
+            maps,
+            jigeunTurns,
+            weekendHolidayTurns,
+          });
+          quarterTotal += monthRestTotal(totals);
+
+          // 요일 행: 그 달의 실제 요일을 열 위치에 맞춰 적는다.
+          const dayRow = ws.addRow([
+            "",
+            "",
+            "",
+            "",
+            "",
+            ...dayNumbers.map((n) => {
+              const date = maps.dates[n - 1];
+              return date ? `(${getDayName(date)})` : "";
+            }),
+          ]);
+          dayRow.alignment = { horizontal: "center" };
+          dayNumbers.forEach((n, i) => {
+            const date = maps.dates[n - 1];
+            if (!date) return;
+            const color = getDayExcelColor(date, maps.holidaySet);
+            dayRow.getCell(i + FIXED_COLS + 1).font = color
+              ? { bold: true, color: { argb: color } }
+              : { bold: true };
+          });
+
+          // 데이터 행: 월 라벨 + 그 달 휴무수 + 근무 칸.
+          const monthLabel = `${Number(monthValues[mi].slice(5, 7))}월`;
+          const row = ws.addRow([
+            "",
+            "",
+            "",
+            monthLabel,
+            monthRestTotal(totals),
+            ...dayNumbers.map((n) => cells[n - 1]?.text ?? ""),
+          ]);
+          row.alignment = { horizontal: "center", wrapText: true };
+          dayNumbers.forEach((n, i) => {
+            const c = cells[n - 1];
+            if (!c) return;
+            const argb = getTurnExcelFill(
+              c.turn,
+              c.isRest,
+              c.isSubstituted,
+              jigeunTurns,
+              c.special
+            );
+            if (argb) {
+              row.getCell(i + FIXED_COLS + 1).fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb },
+              };
+            }
+          });
+        });
+
+        // 사번·이름·분기 총휴무를 이 직원 블록 전체에 걸쳐 세로 병합.
+        const blockEnd = ws.rowCount;
+        ws.getCell(blockStart, 1).value = emp.employee_number ?? "";
+        ws.getCell(blockStart, 2).value = emp.staff_name;
+        // 분기 목표(QUARTER_TARGET=24)와 비교하는 값. 분기휴무 검증 화면과 같은 공식.
+        ws.getCell(blockStart, 3).value = quarterTotal;
+        for (let col = 1; col <= 3; col++) {
+          ws.mergeCells(blockStart, col, blockEnd, col);
+          ws.getCell(blockStart, col).alignment = {
+            vertical: "middle",
+            horizontal: col === 2 ? "left" : "center",
+          };
+        }
+      }
+
+      ws.views = [{ state: "frozen", xSplit: FIXED_COLS, ySplit: 1 }];
+    }
+
+    await downloadWorkbook(wb, `분기근무표_${year}_${quarter}분기.xlsx`);
   };
 
   const selectedEntries = selectedDate
@@ -820,6 +849,32 @@ export function AdminCalendar() {
           )}
           Excel
         </Button>
+        {quarterInfo && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={quarterExportBusy}
+            title={`${quarterInfo.year}년 ${quarterInfo.quarter}분기 근무표 엑셀 다운로드`}
+            onClick={() => {
+              setQuarterExportBusy(true);
+              setError(null);
+              exportQuarterExcel()
+                .catch((err) =>
+                  setError(
+                    err instanceof Error ? err.message : "분기 엑셀 생성 실패"
+                  )
+                )
+                .finally(() => setQuarterExportBusy(false));
+            }}
+          >
+            {quarterExportBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            분기 Excel
+          </Button>
+        )}
       </div>
 
       <div className="px-3 pb-3" ref={staffPickerRef}>
