@@ -55,6 +55,7 @@ import {
   ChevronDown,
   Download,
   Trash2,
+  Shuffle,
   X,
 } from "lucide-react";
 import {
@@ -89,6 +90,32 @@ interface SpecialEntry {
 // (countJigeunSlots 주석 참고) — 추첨을 돌리면 초과 표시가 풀린다.
 function countJigeun(entries: SpecialEntry[], pos: Position): number {
   return countJigeunSlots(entries.filter((e) => e.staff_position === pos));
+}
+
+// pool 에서 cap 명을 무작위로 당첨시키고 나머지를 탈락으로 가른다 (Fisher-Yates).
+// 개별 추첨(runLottery)과 월 일괄 추첨(runBulkLottery)이 이 하나를 공유한다.
+function drawIds(
+  pool: SpecialEntry[],
+  cap: number
+): { wonIds: string[]; lostIds: string[] } {
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const winners = new Set(shuffled.slice(0, cap).map((e) => e.id));
+  return {
+    wonIds: pool.filter((e) => winners.has(e.id)).map((e) => e.id),
+    lostIds: pool.filter((e) => !winners.has(e.id)).map((e) => e.id),
+  };
+}
+
+// 월 일괄 추첨 대상 한 건 = (날짜 × 직책) 조합.
+interface BulkTarget {
+  date: string;
+  pos: Position;
+  cap: number;
+  pool: SpecialEntry[]; // 그 날 그 직책의 지근 신청 전체
 }
 
 export function AdminCalendar() {
@@ -126,6 +153,10 @@ export function AdminCalendar() {
   const [addError, setAddError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
   const [quarterExportBusy, setQuarterExportBusy] = useState(false);
+  // 월 일괄 추첨 — 미리보기 모달 / 실행 중 / 완료 요약
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
   // 분기 마지막 달(3·6·9·12월)에만 분기 병합 엑셀 버튼을 노출한다.
   const quarterInfo = useMemo(() => quarterEndOf(monthValue), [monthValue]);
 
@@ -164,6 +195,36 @@ export function AdminCalendar() {
       });
     }
     return m;
+  }, [specialMap, holidays, caps]);
+
+  // 이 달에서 '아직 추첨하지 않은' 정원 초과 (날짜 × 직책) 목록.
+  // 추첨 흔적(lottery_status)이 하나라도 있는 조합은 제외한다 — 일괄 실행으로
+  // 기존 당첨자가 뒤집히는 사고를 막기 위해서다. 재추첨이 필요하면 날짜 셀
+  // 다이얼로그의 개별 '재추첨' 버튼을 쓴다.
+  const bulkTargets = useMemo<BulkTarget[]>(() => {
+    const list: BulkTarget[] = [];
+    for (const [date, entries] of specialMap) {
+      const cap = getPositionCap(date, holidays, caps);
+      for (const pos of POSITIONS) {
+        const group = entries.filter((e) => e.staff_position === pos);
+        if (group.some((e) => e.lottery_status != null)) continue;
+        // 다이얼로그의 isOver 와 같은 기준으로 초과를 판정한다.
+        if (countJigeunSlots(group) <= cap) continue;
+        list.push({
+          date,
+          pos,
+          cap,
+          pool: group.filter((e) => e.record_type === "지근"),
+        });
+      }
+    }
+    // 날짜 오름차순 → 같은 날짜면 POSITIONS 순서
+    list.sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        POSITIONS.indexOf(a.pos) - POSITIONS.indexOf(b.pos)
+    );
+    return list;
   }, [specialMap, holidays, caps]);
 
   const fetchData = useCallback(async () => {
@@ -389,6 +450,7 @@ export function AdminCalendar() {
     const [year, month] = monthValue.split("-").map(Number);
     const d = new Date(year, month - 1 + delta);
     setMonthValue(format(d, "yyyy-MM"));
+    setBulkResult(null);
   };
 
   const changeType = async (id: string, recordType: RecordType) => {
@@ -447,14 +509,7 @@ export function AdminCalendar() {
     )
       return;
 
-    const shuffled = [...pool];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const winners = new Set(shuffled.slice(0, cap).map((e) => e.id));
-    const wonIds = pool.filter((e) => winners.has(e.id)).map((e) => e.id);
-    const lostIds = pool.filter((e) => !winners.has(e.id)).map((e) => e.id);
+    const { wonIds, lostIds } = drawIds(pool, cap);
     const now = new Date().toISOString();
 
     setBusyId(`lottery-${pos}`);
@@ -475,6 +530,55 @@ export function AdminCalendar() {
       setError(err instanceof Error ? err.message : "추첨 실패");
     } finally {
       setBusyId(null);
+    }
+  };
+
+  // 이 달의 미추첨 정원 초과 (날짜 × 직책)을 한 번에 추첨한다.
+  // 날짜별로 UPDATE 를 나누지 않고 당첨/탈락 id 를 모아 두 번의 .in() 으로 보낸다
+  // (lottery_at 은 어차피 실행 시각 하나이고, fetchData 도 마지막에 한 번만 돈다).
+  const runBulkLottery = async () => {
+    if (bulkTargets.length === 0) return;
+    const now = new Date().toISOString();
+    const allWon: string[] = [];
+    const allLost: string[] = [];
+    for (const t of bulkTargets) {
+      const { wonIds, lostIds } = drawIds(t.pool, t.cap);
+      allWon.push(...wonIds);
+      allLost.push(...lostIds);
+    }
+
+    setBulkBusy(true);
+    setError(null);
+    setBulkResult(null);
+    try {
+      if (allWon.length > 0) {
+        const { error: e1 } = await supabase
+          .from("special_schedules")
+          .update({ lottery_status: "won", lottery_at: now })
+          .in("id", allWon);
+        if (e1) throw e1;
+      }
+      if (allLost.length > 0) {
+        const { error: e2 } = await supabase
+          .from("special_schedules")
+          .update({ lottery_status: "lost", lottery_at: now })
+          .in("id", allLost);
+        if (e2) throw e2;
+      }
+      await fetchData();
+      setBulkResult(
+        `${bulkTargets.length}건 추첨 완료 — 당첨 ${allWon.length}명 · 탈락 ${allLost.length}명`
+      );
+      setBulkOpen(false);
+    } catch (err) {
+      // 두 UPDATE 는 한 트랜잭션이 아니다. 뒤쪽이 실패하면 일부만 반영된다.
+      setError(
+        (err instanceof Error ? err.message : "일괄 추첨 실패") +
+          " — 일부만 반영되었을 수 있습니다. 날짜별로 확인 후 개별 재추첨하세요."
+      );
+      await fetchData();
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -875,7 +979,34 @@ export function AdminCalendar() {
             분기 Excel
           </Button>
         )}
+        {bulkTargets.length > 0 && (
+          <Button
+            size="sm"
+            variant="default"
+            title="이 달의 정원 초과 날짜를 한 번에 추첨"
+            onClick={() => {
+              setBulkResult(null);
+              setBulkOpen(true);
+            }}
+          >
+            <Shuffle className="h-4 w-4" />
+            일괄 추첨 ({bulkTargets.length})
+          </Button>
+        )}
       </div>
+
+      {bulkResult && (
+        <div className="mx-3 mb-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400 flex items-center justify-between gap-2">
+          <span>{bulkResult}</span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setBulkResult(null)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       <div className="px-3 pb-3" ref={staffPickerRef}>
         <div className="flex gap-1 pb-2">
@@ -1285,6 +1416,88 @@ export function AdminCalendar() {
           void fetchData();
         }}
       />
+
+      <Dialog
+        open={bulkOpen}
+        onOpenChange={(open) => !bulkBusy && setBulkOpen(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>일괄 추첨 확인</DialogTitle>
+            <DialogDescription>
+              <span className="font-semibold text-foreground">
+                {monthValue}
+              </span>{" "}
+              월의 정원 초과{" "}
+              <span className="font-semibold text-foreground">
+                {bulkTargets.length}건
+              </span>
+              을 한 번에 추첨합니다. 이미 추첨한 날짜는 제외됩니다. 이 작업은
+              되돌릴 수 없습니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[50vh] overflow-auto rounded-md border divide-y text-sm">
+            {bulkTargets.map((t) => {
+              const [, m, d] = t.date.split("-");
+              const won = Math.min(t.cap, t.pool.length);
+              return (
+                <div
+                  key={`${t.date}-${t.pos}`}
+                  className="flex items-center justify-between gap-2 px-3 py-1.5"
+                >
+                  <span className="tabular-nums">
+                    {Number(m)}/{Number(d)}({getDayName(t.date)}) · {t.pos}
+                  </span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {t.pool.length}명 중 {won}명 당첨 →{" "}
+                    <span className="text-destructive font-semibold">
+                      {t.pool.length - won}명 탈락
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-sm text-muted-foreground">
+            총{" "}
+            <span className="font-semibold text-foreground tabular-nums">
+              {bulkTargets.reduce(
+                (n, t) => n + Math.min(t.cap, t.pool.length),
+                0
+              )}
+              명
+            </span>{" "}
+            당첨 ·{" "}
+            <span className="font-semibold text-destructive tabular-nums">
+              {bulkTargets.reduce(
+                (n, t) => n + Math.max(0, t.pool.length - t.cap),
+                0
+              )}
+              명
+            </span>{" "}
+            탈락
+          </p>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              disabled={bulkBusy}
+              onClick={() => setBulkOpen(false)}
+            >
+              취소
+            </Button>
+            <Button disabled={bulkBusy} onClick={runBulkLottery}>
+              {bulkBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "추첨 실행"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
