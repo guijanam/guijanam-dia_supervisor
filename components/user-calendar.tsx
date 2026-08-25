@@ -81,6 +81,9 @@ export function UserCalendar() {
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialSchedule>>(
     new Map()
   );
+  // 본인이 추첨에서 떨어진 날짜. specialMap 에서는 빼되(신청내역·월집계에
+  // 잡히지 않게) 달력에 "추첨 탈락" 표시는 남기려고 따로 들고 있는다.
+  const [lostDates, setLostDates] = useState<Set<string>>(new Set());
   const [allEntriesMap, setAllEntriesMap] = useState<Map<string, DayEntry[]>>(
     new Map()
   );
@@ -381,18 +384,29 @@ export function UserCalendar() {
       }>;
 
       // 본인 신청 내역 맵 (기존 기능 유지)
+      //
+      // 추첨 탈락 건은 여기서 뺀다. DB 행은 남아 있지만(추첨 탈락자 목록과
+      // 추가 신청 자격의 유일한 근거라 지울 수 없다) 사용자 입장에서는 이미
+      // 취소된 신청이다. 남겨 두면 달력에 본인 지근이 그대로 떠서 아직
+      // 자기 자리인 줄 알고, 다른 날짜를 다시 잡을 때 혼동한다.
+      // 대신 날짜만 lostDates 에 모아 "추첨 탈락" 표시를 남긴다.
       const sMap = new Map<string, SpecialSchedule>();
+      const lostSet = new Set<string>();
       for (const row of list) {
-        if (row.staff_id === employee.staff_id) {
-          sMap.set(row.target_date, {
-            id: row.id,
-            staff_id: row.staff_id,
-            target_date: row.target_date,
-            record_type: row.record_type,
-          });
+        if (row.staff_id !== employee.staff_id) continue;
+        if (row.lottery_status === "lost") {
+          lostSet.add(row.target_date);
+          continue;
         }
+        sMap.set(row.target_date, {
+          id: row.id,
+          staff_id: row.staff_id,
+          target_date: row.target_date,
+          record_type: row.record_type,
+        });
       }
       setSpecialMap(sMap);
+      setLostDates(lostSet);
 
       // staff_id → 직원 정보 매핑
       const empMap = new Map<
@@ -420,6 +434,10 @@ export function UserCalendar() {
         const emp = empMap.get(row.staff_id);
         const position = emp?.staff_position ?? "";
         if (position !== employee.staff_position) continue;
+        // 본인 탈락 건은 신청내역에서 뺐으므로 칩도 띄우지 않는다. 동료의
+        // 탈락 건은 그대로 둔다 — 그 날 자리가 어떻게 찼는지 보이는 편이 낫다.
+        if (row.staff_id === employee.staff_id && row.lottery_status === "lost")
+          continue;
         const entry: DayEntry = {
           id: row.id,
           staff_id: row.staff_id,
@@ -623,6 +641,11 @@ export function UserCalendar() {
                     {getJigeunBadgeLabel(jigeunKind)}
                   </span>
                 )}
+                {lostDates.has(date) && (
+                  <span className="text-[9px] font-bold leading-none text-center text-muted-foreground line-through">
+                    추첨 탈락
+                  </span>
+                )}
                 <div className="mt-auto flex flex-col gap-0.5">
                   {entries.map((e) => {
                     const isSelf = e.staff_id === employee.staff_id;
@@ -696,6 +719,7 @@ export function UserCalendar() {
             : null
         }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
+        lostOnDate={selectedDate ? lostDates.has(selectedDate) : false}
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
         phase={phase}
         canRegister={canRegister}

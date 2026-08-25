@@ -28,6 +28,9 @@ interface DayModalProps {
   // 운휴대기(연휴 짝 치환) 대치근무. 치환이 없으면 null.
   substitutedTurn?: string | null;
   existing: SpecialSchedule | null;
+  // 이 날짜의 신청이 추첨에서 떨어졌는지. 탈락 건은 existing 으로 넘어오지
+  // 않으므로(신청내역에서 뺐다) 따로 받아서 왜 사라졌는지 안내한다.
+  lostOnDate?: boolean;
   allEntries: DayEntry[];
   // 신청 단계. 등록/삭제 허용 여부는 아래 두 플래그가 결정하고, phase 는
   // 안내 문구를 고르는 데 쓴다.
@@ -52,6 +55,7 @@ export function DayModal({
   regularTurn,
   substitutedTurn,
   existing,
+  lostOnDate = false,
   allEntries,
   phase,
   canRegister,
@@ -75,10 +79,18 @@ export function DayModal({
   const alreadyJigeun = existing?.record_type === "지근";
   const jigeunFull =
     !!jigeunSlot && !alreadyJigeun && jigeunSlot.used >= jigeunSlot.cap;
-  // 관리자 대리 등록 화면(enforceJigeunCap=false)은 정원을 '보여주되 막지는'
-  // 않는다 — 관리자는 신청 마감일도 무시하는 권한이라 정원을 넘겨 배치해야 하는
-  // 예외가 있고, 그 판단은 관리자에게 맡긴다.
-  const canRegisterJigeun = canRegister && (!enforceJigeunCap || !jigeunFull);
+  // 추첨에서 떨어진 날짜에는 지근을 다시 신청할 수 없다. 그 자리는 이미
+  // 당첨자로 채워졌고, 재신청을 허용하면 정원을 넘기거나 추첨 결과를
+  // 뒤집는 셈이 된다. 다른 날짜로 잡아야 한다.
+  // (지휴는 정원과 무관하므로 막지 않는다.)
+  const jigeunBlockedByLottery = lostOnDate;
+  // 관리자 대리 등록 화면(enforceJigeunCap=false)은 정원·탈락을 '보여주되
+  // 막지는' 않는다 — 관리자는 신청 마감일도 무시하는 권한이라 정원을 넘겨
+  // 배치하거나 탈락자를 그 날에 되돌려야 하는 예외가 있고, 그 판단은
+  // 관리자에게 맡긴다.
+  const canRegisterJigeun =
+    canRegister &&
+    (!enforceJigeunCap || (!jigeunFull && !jigeunBlockedByLottery));
 
   const register = async (recordType: RecordType) => {
     if (!canRegister) return;
@@ -93,6 +105,15 @@ export function DayModal({
             staff_id: employee.staff_id,
             target_date: date,
             record_type: recordType,
+            // 탈락한 날짜에 덮어쓰는 경우 탈락 표시를 지운다. 사용자는
+            // 애초에 여기까지 못 온다(canRegisterJigeun 이 막는다). 관리자
+            // 대리 등록(enforceJigeunCap=false)으로 탈락자를 그 날에
+            // 되돌리는 예외 경로에서만 도달하며, 그때는 새 신청으로 봐야
+            // 한다 — 남겨 두면 upsert 된 행이 여전히 'lost' 라 곧바로
+            // 신청내역에서 숨겨져 "눌러도 아무 일도 안 일어나는" 상태가 된다.
+            // admin-calendar 의 rescheduleLoser 가 날짜를 옮길 때와 같은 처리.
+            lottery_status: null,
+            lottery_at: null,
           },
           { onConflict: "staff_id,target_date" }
         );
@@ -151,8 +172,25 @@ export function DayModal({
                 </span>
               </>
             )}
+            {lostOnDate && (
+              <>
+                {" · "}
+                <span className="font-semibold text-muted-foreground">
+                  추첨 탈락
+                </span>
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
+
+        {lostOnDate && (
+          <p className="rounded border bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
+            이 날짜는 추첨에서 탈락해 신청이 취소되었습니다.{" "}
+            {enforceJigeunCap
+              ? "이 날에는 지근을 다시 신청할 수 없습니다 — 다른 날짜를 선택해 주세요."
+              : "사용자는 이 날에 지근을 다시 신청할 수 없습니다(관리자는 가능)."}
+          </p>
+        )}
 
         {error && (
           <p className="text-destructive text-sm font-medium">{error}</p>
@@ -239,7 +277,10 @@ export function DayModal({
           </p>
         )}
 
-        {jigeunFull && canRegister && (
+        {/* 탈락한 날은 정원이 찬 것도 사실이지만(그래서 떨어졌다) 위의 탈락
+            안내가 더 구체적인 이유다. 둘 다 띄우면 "다른 날짜를 고르세요" 가
+            두 번 나오므로 정원 안내는 접는다. */}
+        {jigeunFull && canRegister && !jigeunBlockedByLottery && (
           <p className="text-xs text-destructive text-center font-medium">
             이 날은 {employee.staff_position} 지근 정원({jigeunSlot?.cap}명)이
             모두 찼습니다.{" "}
@@ -255,11 +296,13 @@ export function DayModal({
             disabled={isSaving || !canRegisterJigeun}
             onClick={() => register("지근")}
             title={
-              jigeunFull
-                ? enforceJigeunCap
-                  ? "지근 정원이 모두 찼습니다"
-                  : "지근 정원이 모두 찼습니다 — 등록 시 정원 초과"
-                : undefined
+              jigeunBlockedByLottery
+                ? "추첨에서 탈락한 날짜라 다시 신청할 수 없습니다"
+                : jigeunFull
+                  ? enforceJigeunCap
+                    ? "지근 정원이 모두 찼습니다"
+                    : "지근 정원이 모두 찼습니다 — 등록 시 정원 초과"
+                  : undefined
             }
           >
             지근 신청

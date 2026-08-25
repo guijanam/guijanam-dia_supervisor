@@ -76,6 +76,10 @@ export function AdminEmployeeCalendarView({
   const [specialMap, setSpecialMap] = useState<Map<string, SpecialSchedule>>(
     new Map()
   );
+  // 대상 직원이 추첨에서 떨어진 날짜. 사용자 화면(user-calendar)과 동일하게
+  // 신청내역에서는 빼고 "추첨 탈락" 표시만 남긴다 — 관리자가 직원 시점으로
+  // 보는 화면이라 사용자가 보는 것과 어긋나면 안 된다.
+  const [lostDates, setLostDates] = useState<Set<string>>(new Set());
   const [allEntriesMap, setAllEntriesMap] = useState<Map<string, DayEntry[]>>(
     new Map()
   );
@@ -286,18 +290,25 @@ export function AdminEmployeeCalendarView({
         lottery_status: LotteryStatus | null;
       }>;
 
+      // 추첨 탈락 건은 신청내역에서 뺀다(날짜만 lostDates 에 남긴다).
+      // 사용자 화면과 같은 규칙 — user-calendar.tsx 의 sMap 참고.
       const sMap = new Map<string, SpecialSchedule>();
+      const lostSet = new Set<string>();
       for (const row of list) {
-        if (row.staff_id === staff.staff_id) {
-          sMap.set(row.target_date, {
-            id: row.id,
-            staff_id: row.staff_id,
-            target_date: row.target_date,
-            record_type: row.record_type,
-          });
+        if (row.staff_id !== staff.staff_id) continue;
+        if (row.lottery_status === "lost") {
+          lostSet.add(row.target_date);
+          continue;
         }
+        sMap.set(row.target_date, {
+          id: row.id,
+          staff_id: row.staff_id,
+          target_date: row.target_date,
+          record_type: row.record_type,
+        });
       }
       setSpecialMap(sMap);
+      setLostDates(lostSet);
 
       const empMap = new Map<
         number,
@@ -352,6 +363,9 @@ export function AdminEmployeeCalendarView({
         }
 
         if (!isSelf) continue;
+        // 탈락 건은 표시용 aMap 에서만 뺀다. slotMap(정원 카운트)에는 위에서
+        // 이미 넣었고, countJigeunSlots 가 탈락 건을 알아서 제외한다.
+        if (row.lottery_status === "lost") continue;
         const arr = aMap.get(row.target_date);
         if (arr) arr.push(entry);
         else aMap.set(row.target_date, [entry]);
@@ -506,6 +520,11 @@ export function AdminEmployeeCalendarView({
                     {getJigeunBadgeLabel(jigeunKind)}
                   </span>
                 )}
+                {lostDates.has(date) && (
+                  <span className="text-[9px] font-bold leading-none text-center text-muted-foreground line-through">
+                    추첨 탈락
+                  </span>
+                )}
                 <div className="mt-auto flex flex-col gap-0.5">
                   {slot && (
                     <span
@@ -568,6 +587,7 @@ export function AdminEmployeeCalendarView({
             : null
         }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
+        lostOnDate={selectedDate ? lostDates.has(selectedDate) : false}
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
         // 관리자는 신청 마감일·추가 신청일과 무관하게 등록·삭제 모두 가능하다.
         phase="open"
