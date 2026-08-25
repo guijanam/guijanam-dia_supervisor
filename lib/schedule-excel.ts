@@ -80,7 +80,7 @@ export async function buildMonthMaps(
     fetchScheduleByRange(padded.start, padded.end),
     supabase
       .from("special_schedules")
-      .select("staff_id, target_date, record_type")
+      .select("staff_id, target_date, record_type, lottery_status")
       .gte("target_date", start)
       .lte("target_date", end),
     supabase
@@ -123,12 +123,18 @@ export async function buildMonthMaps(
     contextByStaff
   );
 
+  // 추첨에서 떨어진 건은 근무가 취소된 것이라 맵에 넣지 않는다. 그러면
+  // 총휴무 집계(buildStaffMonthCells)와 셀 표기·배경색 양쪽에서 자동으로
+  // 빠진다 — 실제로 그날 근무하지 않으므로 근무표에 지근으로 찍히면 안 되고,
+  // 총휴무도 분기휴무 검증 화면(quarter-balance-calc)과 같은 값이 나와야 한다.
   const specialByStaff = new Map<string, RecordType>();
   for (const row of (specialResult.data ?? []) as Array<{
     staff_id: number;
     target_date: string;
     record_type: RecordType;
+    lottery_status: string | null;
   }>) {
+    if (row.lottery_status === "lost") continue;
     specialByStaff.set(`${row.staff_id}|${row.target_date}`, row.record_type);
   }
 

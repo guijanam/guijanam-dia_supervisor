@@ -136,6 +136,7 @@ export function QuarterBalance() {
         운휴: r.weekendTurnCount,
         지휴: r.jihyuCount,
         지근: r.jigeunCount,
+        탈락: r.lostCount,
         합계: t,
         "목표(24)대비": t - QUARTER_TARGET,
         상태: t < QUARTER_TARGET ? "부족" : "초과",
@@ -243,6 +244,8 @@ export function QuarterBalance() {
             </span>
           </>
         )}
+        <br />
+        추첨 탈락 건은 근무가 취소되어 지근에서 제외됩니다(탈락 열에 별도 표시).
       </div>
 
       {error && (
@@ -274,6 +277,7 @@ export function QuarterBalance() {
                   <TableHead className="text-center">운휴</TableHead>
                   <TableHead className="text-center">지휴</TableHead>
                   <TableHead className="text-center">지근</TableHead>
+                  <TableHead className="text-center">탈락</TableHead>
                   <TableHead className="text-center">합계</TableHead>
                   <TableHead className="text-center">24 대비</TableHead>
                   <TableHead className="text-center">상태</TableHead>
@@ -321,6 +325,18 @@ export function QuarterBalance() {
                       </TableCell>
                       <TableCell className="text-center text-sm text-green-700 dark:text-green-400">
                         −{r.jigeunCount}
+                      </TableCell>
+                      {/* 탈락 건은 지근에서 이미 빠져 있다. 합계에는 들어가지
+                          않으므로 회색으로 두어 가감 항목과 구분한다. */}
+                      <TableCell
+                        className="text-center text-sm text-muted-foreground"
+                        title={
+                          r.lostCount > 0
+                            ? `추첨 탈락 ${r.lostCount}건 — 지근에서 제외됨`
+                            : undefined
+                        }
+                      >
+                        {r.lostCount > 0 ? r.lostCount : "-"}
                       </TableCell>
                       <TableCell className="text-center text-sm font-bold">
                         {t}

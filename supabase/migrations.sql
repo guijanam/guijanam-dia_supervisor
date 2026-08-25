@@ -136,6 +136,37 @@ alter table public.coworker_list
 --  - lottery_at: 마지막 추첨 시각 (재추첨 시 갱신).
 --  - 탈락자는 자동 삭제하지 않으며, 관리자가 target_date 를
 --    변경하면 lottery_status/lottery_at 을 NULL 로 초기화.
+--
+--  [화면별 취급 — 행은 남기고 사용자 화면에서만 숨긴다]
+--  탈락 건은 DB 에 그대로 남지만(추첨 탈락자 목록과 추가 신청 자격의
+--  유일한 근거라 지울 수 없다) 사용자 시점 화면에서는 이미 취소된 신청으로
+--  본다. user-calendar.tsx / admin-employee-calendar-view.tsx 는 탈락 건을
+--  본인 신청내역(specialMap)·월 집계·본인 칩에서 빼고 "추첨 탈락" 표시만
+--  남긴다 — 남겨 두면 사용자가 아직 자기 자리인 줄 알고 다른 날짜를 다시
+--  잡을 때 혼동하기 때문이다.
+--
+--  [휴무 합계 — 탈락 건은 어디서도 지근/지휴로 세지 않는다]
+--  합계 공식은 '휴무 + 운휴 + 지휴 − 지근' 이고, 지근을 빼는 것은 그날
+--  나와서 일했다는 뜻이다. 탈락 건은 근무가 취소되어 실제로 일하지 않으므로
+--  지근으로 세면 합계가 1 적게 나온다(탈락으로 휴무가 늘어난 직원이 24 로
+--  보여 분기휴무 검증 목록에서 빠졌다). 그래서 아래 셋 모두 제외한다:
+--    - lib/quarter-balance-calc.ts  (분기휴무 검증 화면)
+--    - user-calendar.tsx / admin-employee-calendar-view.tsx  (월 집계)
+--    - lib/schedule-excel.ts        (월간·분기 근무표 엑셀; 셀 표기에서도 제외)
+--  탈락 건수는 QuarterTotals.lostCount 로만 세어 검증 화면의 '탈락' 열과
+--  추가 신청 자격 판정에 쓴다.
+--  정원 카운트(countJigeunSlots)도 종전대로 탈락 건을 제외한다.
+--  관리자 화면 중 추첨 탈락자 목록·신청현황·admin-calendar 의 신청 목록은
+--  탈락 건을 그대로 보여준다(추첨 운영에 필요한 원본 정보).
+--
+--  탈락한 날짜에는 사용자가 지근을 다시 신청할 수 없다(day-modal.tsx 의
+--  canRegisterJigeun). 그 자리는 이미 당첨자로 채워졌고, 재신청을 허용하면
+--  정원을 넘기거나 추첨 결과를 뒤집는 셈이 된다. 지휴는 정원과 무관하므로
+--  막지 않는다.
+--  관리자 대리 등록 화면(enforceJigeunCap=false)에서는 막지 않는다 —
+--  탈락자를 그 날에 되돌려야 하는 예외 판단은 관리자 몫이다. 이 경로로
+--  덮어쓰면 upsert 가 lottery_status/lottery_at 을 NULL 로 초기화한다
+--  (남겨 두면 행이 여전히 'lost' 라 곧바로 다시 숨겨진다).
 -- ============================================================
 alter table public.special_schedules
   add column if not exists lottery_status text
@@ -535,6 +566,12 @@ alter table public.app_settings
 --  판정 근거가 lottery_status='lost' 하나뿐이다. 관리자가 탈락 건을 삭제하거나
 --  rescheduleLoser 로 날짜를 옮기면(이때 lottery_status 가 NULL 로 초기화된다)
 --  그 직원은 추가 신청 대상에서 빠진다. 추첨 후 탈락 건은 그대로 두어야 한다.
+--
+--  사용자 화면에서 탈락 건이 안 보이는 것은 표시상의 처리일 뿐 행은 남아 있다
+--  (섹션 8 의 [화면별 취급] 참고). 사용자는 탈락한 날짜에 지근을 다시 신청할
+--  수 없으므로 사용자 조작만으로는 탈락 표시가 지워지지 않는다 — 자격 판정은
+--  안전하다. 표시가 지워지는 경로는 관리자 쪽뿐이다(삭제, rescheduleLoser,
+--  대리 등록으로 그 날짜에 덮어쓰기).
 --
 --  - extra_request_deadline: NULL = 추가 신청 기간 없음.
 --  - extra_request_year / extra_request_quarter: 24 합계를 계산할 대상 분기.

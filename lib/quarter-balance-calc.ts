@@ -25,11 +25,11 @@ import { format } from "date-fns";
 export interface QuarterTotals {
   hueCount: number; // 휴무 (turn 에 '휴')
   weekendTurnCount: number; // 운휴 (주말/공휴일 & 운휴 번호)
-  jihyuCount: number; // 지휴 (+)
-  jigeunCount: number; // 지근 (−)
+  jihyuCount: number; // 지휴 (+) — 추첨 탈락 건 제외
+  jigeunCount: number; // 지근 (−) — 추첨 탈락 건 제외
   // 추첨에서 탈락한(lottery_status='lost') 신청 건수.
-  // 추가 신청 기간을 여는 대상을 가리는 데 쓴다. 합계 계산에는 넣지 않는다
-  // (분기휴무 검증 화면의 기존 수치를 바꾸지 않기 위함).
+  // 탈락 건은 근무가 취소된 것이라 위 지근/지휴 카운트에서 빠져 있고, 여기서만
+  // 센다. 분기휴무 검증 화면의 '탈락' 열과 추가 신청 자격 판정에 쓴다.
   lostCount: number;
 }
 
@@ -183,8 +183,15 @@ export async function fetchQuarterTotals(
     }
   }
 
-  // 지근/지휴 신청 내역. 합계에는 lottery_status 와 무관하게 전부 카운트한다
-  // (기존 분기휴무 검증 화면의 수치를 그대로 유지). 탈락 건수는 따로 센다.
+  // 지근/지휴 신청 내역. 추첨에서 떨어진 건은 근무가 취소된 것이라 실제로
+  // 그날 일하지 않는다. 지근은 합계에서 1을 빼는 항목이므로(= 그날 나와서
+  // 일했다) 탈락 건을 세면 일하지도 않은 날을 근무로 쳐서 합계가 1 적게
+  // 나온다 — 탈락으로 휴무가 늘어난 직원이 24 로 보여 검증 목록에서 빠졌다.
+  // 그래서 지근/지휴 카운트에서 제외하고, 탈락 건수는 lostCount 로만 센다.
+  //
+  // 추첨은 지근만 대상으로 하므로(admin-calendar 의 runLottery) 지휴가 lost
+  // 가 될 일은 없지만, 관리자가 record_type 을 나중에 바꿀 수 있어 둘 다
+  // 방어적으로 제외한다.
   for (const sp of (specialResult.data ?? []) as Array<{
     staff_id: number;
     target_date: string;
@@ -192,9 +199,12 @@ export async function fetchQuarterTotals(
     lottery_status: string | null;
   }>) {
     const r = ensure(sp.staff_id);
+    if (sp.lottery_status === "lost") {
+      r.lostCount++;
+      continue;
+    }
     if (sp.record_type === "지휴") r.jihyuCount++;
     else if (sp.record_type === "지근") r.jigeunCount++;
-    if (sp.lottery_status === "lost") r.lostCount++;
   }
 
   return acc;
