@@ -18,12 +18,20 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   Loader2,
   Phone,
   MessageSquare,
   Copy,
   Download,
   Users,
+  Trash2,
 } from "lucide-react";
 
 const POSITIONS = ["전체", "기관사", "차장"] as const;
@@ -67,6 +75,9 @@ export function LotteryLosersPanel() {
   const [done, setDone] = useState<string | null>(null);
   const [nameFilter, setNameFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState<PositionFilter>("전체");
+  // 분기 전체 탈락 건 삭제(과거 분기 정리용) 확인창.
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purgeBusy, setPurgeBusy] = useState(false);
 
   // 첫 화면이 빈 목록이 되지 않도록 기본 분기를 고른다.
   //
@@ -287,6 +298,46 @@ export function LotteryLosersPanel() {
     copyText(phones.join(","), `${phones.length}개 번호를 복사했습니다.`);
   };
 
+  // 선택한 분기가 아직 진행 중인지. 지나간 분기를 정리하는 것이 이 기능의
+  // 목적이라, 진행 중인 분기를 지우려 하면 확인창에서 경고한다(막지는 않는다).
+  const isCurrentOrFutureQuarter =
+    year > now.getFullYear() ||
+    (year === now.getFullYear() &&
+      quarter >= Math.floor(now.getMonth() / 3) + 1);
+
+  // 분기 전체의 탈락 건을 DB 에서 지운다.
+  //
+  // 지나간 분기의 탈락 기록은 과거 데이터라 계속 쌓이면 조회만 무거워진다.
+  // 지워도 분기 휴무 합계(24)는 달라지지 않는다 — 탈락 건은 애초에 지근/지휴
+  // 카운트에서 빠져 lostCount 로만 세기 때문이다(quarter-balance-calc 참고).
+  // 대신 그 분기의 '탈락' 기록과 추가 신청 자격 판정 근거는 영구히 사라진다.
+  //
+  // 화면 필터(이름/직책)와 무관하게 분기 전체를 지운다 — 필터를 걸어둔 걸
+  // 잊고 눌렀을 때 일부만 지워져 헷갈리는 것보다, 범위가 예측 가능한 편이 낫다.
+  const purgeQuarter = async () => {
+    setPurgeBusy(true);
+    setError(null);
+    setDone(null);
+    try {
+      const { start, end } = quarterRange(year, quarter);
+      const { error: delErr, count } = await supabase
+        .from("special_schedules")
+        .delete({ count: "exact" })
+        .eq("lottery_status", "lost")
+        .gte("target_date", start)
+        .lte("target_date", end);
+      if (delErr) throw delErr;
+      setPurgeOpen(false);
+      // fetchData 가 done 을 비우므로 재조회 뒤에 안내를 띄운다.
+      await fetchData();
+      setDone(`${year}년 ${quarter}분기 탈락 건 ${count ?? 0}건을 삭제했습니다.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "삭제에 실패했습니다.");
+    } finally {
+      setPurgeBusy(false);
+    }
+  };
+
   const exportExcel = async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("추첨 탈락자");
@@ -410,6 +461,16 @@ export function LotteryLosersPanel() {
           disabled={filtered.length === 0}
         >
           <Download className="h-4 w-4" /> Excel 다운로드
+        </Button>
+        {/* 필터와 무관하게 분기 전체를 지우므로 활성 조건도 rows(필터 전) 기준. */}
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => setPurgeOpen(true)}
+          disabled={isLoading || rows.length === 0}
+          title="이 분기의 탈락 기록을 모두 삭제합니다"
+        >
+          <Trash2 className="h-4 w-4" /> 분기 전체 삭제
         </Button>
       </div>
 
@@ -543,6 +604,72 @@ export function LotteryLosersPanel() {
             })}
         </div>
       </div>
+
+      <Dialog
+        open={purgeOpen}
+        onOpenChange={(open) => !purgeBusy && setPurgeOpen(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>분기 탈락 기록 전체 삭제</DialogTitle>
+            <DialogDescription>
+              <span className="font-semibold text-foreground">
+                {year}년 {quarter}분기
+              </span>
+              의 추첨 탈락 기록{" "}
+              <span className="font-semibold text-foreground">
+                {rows.reduce((sum, r) => sum + r.dates.length, 0)}건
+              </span>
+              ({rows.length}명)을 삭제합니다. 화면의 이름·직책 필터와 무관하게
+              이 분기 전체가 대상이며, <b>되돌릴 수 없습니다.</b>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            삭제해도 분기 휴무 합계(24)는 달라지지 않습니다 — 탈락 건은 원래
+            지근/지휴 집계에서 빠져 있기 때문입니다. 다만 이 분기의{" "}
+            <b>탈락 기록과 추가 신청 자격 판정 근거</b>가 사라지므로, 아직
+            추가 신청을 진행 중인 분기라면 지우지 마세요.
+          </div>
+
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            먼저 <b>Excel 다운로드</b>로 목록을 받아두시길 권합니다 — 삭제 후에는
+            복구할 방법이 없습니다.
+          </p>
+
+          {isCurrentOrFutureQuarter && (
+            <p className="rounded border border-destructive/50 px-3 py-2 text-xs font-medium text-destructive">
+              이 분기는 아직 진행 중이거나 미래 분기입니다. 지나간 분기를
+              정리하려던 것이 맞는지 확인해 주세요.
+            </p>
+          )}
+
+          {error && (
+            <p className="text-destructive text-sm font-medium">{error}</p>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setPurgeOpen(false)}
+              disabled={purgeBusy}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={purgeQuarter}
+              disabled={purgeBusy}
+            >
+              {purgeBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "삭제"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
