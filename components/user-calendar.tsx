@@ -28,6 +28,7 @@ import {
   parseHolidayTurnRulesText,
   getJigeunKind,
   getJigeunBadgeLabel,
+  isDesignatedJigeunDisplay,
 } from "@/lib/types";
 import {
   getCalendarGrid,
@@ -720,6 +721,15 @@ export function UserCalendar() {
         }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
         lostOnDate={selectedDate ? lostDates.has(selectedDate) : false}
+        // 셀의 지정근무 배지와 같은 값(치환 후 displayTurnMap)으로 판정한다.
+        designatedJigeun={
+          selectedDate
+            ? isDesignatedJigeunDisplay(
+                displayTurnMap.get(selectedDate),
+                jigeunTurns
+              )
+            : false
+        }
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
         phase={phase}
         canRegister={canRegister}

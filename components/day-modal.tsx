@@ -31,6 +31,11 @@ interface DayModalProps {
   // 이 날짜의 신청이 추첨에서 떨어졌는지. 탈락 건은 existing 으로 넘어오지
   // 않으므로(신청내역에서 뺐다) 따로 받아서 왜 사라졌는지 안내한다.
   lostOnDate?: boolean;
+  // 이 날이 화면에 지정근무('지(주)'/'지(야)' — 지정근무 번호 또는 운휴대기
+  // 치환)로 표시되는지. 판정은 호출부에서 한다 — 달력 셀의 배지를 그릴 때 쓰는
+  // 값을 그대로 넘겨야 배지와 차단이 어긋나지 않는다.
+  // lib/types.ts 의 isDesignatedJigeunDisplay 참고.
+  designatedJigeun?: boolean;
   allEntries: DayEntry[];
   // 신청 단계. 등록/삭제 허용 여부는 아래 두 플래그가 결정하고, phase 는
   // 안내 문구를 고르는 데 쓴다.
@@ -56,6 +61,7 @@ export function DayModal({
   substitutedTurn,
   existing,
   lostOnDate = false,
+  designatedJigeun = false,
   allEntries,
   phase,
   canRegister,
@@ -84,13 +90,17 @@ export function DayModal({
   // 뒤집는 셈이 된다. 다른 날짜로 잡아야 한다.
   // (지휴는 정원과 무관하므로 막지 않는다.)
   const jigeunBlockedByLottery = lostOnDate;
-  // 관리자 대리 등록 화면(enforceJigeunCap=false)은 정원·탈락을 '보여주되
+  // 관리자가 지정한 지정근무('지(주)'/'지(야)')가 걸린 날에는 지근을 신청할 수
+  // 없다. 이미 그 날이 지근에 해당하므로 신청을 받으면 같은 날에 지정근무와 신청
+  // 지근이 중복되어 정원 계산·추첨이 어긋난다. (지휴는 무관하므로 막지 않는다.)
+  // 관리자 대리 등록 화면(enforceJigeunCap=false)은 정원·탈락·지정근무를 '보여주되
   // 막지는' 않는다 — 관리자는 신청 마감일도 무시하는 권한이라 정원을 넘겨
   // 배치하거나 탈락자를 그 날에 되돌려야 하는 예외가 있고, 그 판단은
   // 관리자에게 맡긴다.
   const canRegisterJigeun =
     canRegister &&
-    (!enforceJigeunCap || (!jigeunFull && !jigeunBlockedByLottery));
+    (!enforceJigeunCap ||
+      (!jigeunFull && !jigeunBlockedByLottery && !designatedJigeun));
 
   const register = async (recordType: RecordType) => {
     if (!canRegister) return;
@@ -192,6 +202,15 @@ export function DayModal({
           </p>
         )}
 
+        {designatedJigeun && (
+          <p className="rounded border bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
+            이 날은 지정근무(<b>지(주)</b>/<b>지(야)</b>)로 지정되어 있습니다.{" "}
+            {enforceJigeunCap
+              ? "이 날에는 지근을 신청할 수 없습니다 — 다른 날짜를 선택해 주세요. (지휴는 신청할 수 있습니다.)"
+              : "사용자는 이 날에 지근을 신청할 수 없습니다(관리자는 가능)."}
+          </p>
+        )}
+
         {error && (
           <p className="text-destructive text-sm font-medium">{error}</p>
         )}
@@ -279,16 +298,19 @@ export function DayModal({
 
         {/* 탈락한 날은 정원이 찬 것도 사실이지만(그래서 떨어졌다) 위의 탈락
             안내가 더 구체적인 이유다. 둘 다 띄우면 "다른 날짜를 고르세요" 가
-            두 번 나오므로 정원 안내는 접는다. */}
-        {jigeunFull && canRegister && !jigeunBlockedByLottery && (
-          <p className="text-xs text-destructive text-center font-medium">
-            이 날은 {employee.staff_position} 지근 정원({jigeunSlot?.cap}명)이
-            모두 찼습니다.{" "}
-            {enforceJigeunCap
-              ? "정원이 남은 다른 날짜를 선택해 주세요."
-              : "그래도 등록하면 정원을 초과합니다."}
-          </p>
-        )}
+            두 번 나오므로 정원 안내는 접는다. 지정근무 안내도 마찬가지. */}
+        {jigeunFull &&
+          canRegister &&
+          !jigeunBlockedByLottery &&
+          !designatedJigeun && (
+            <p className="text-xs text-destructive text-center font-medium">
+              이 날은 {employee.staff_position} 지근 정원({jigeunSlot?.cap}명)이
+              모두 찼습니다.{" "}
+              {enforceJigeunCap
+                ? "정원이 남은 다른 날짜를 선택해 주세요."
+                : "그래도 등록하면 정원을 초과합니다."}
+            </p>
+          )}
 
         <div className="grid grid-cols-2 gap-2">
           <Button
@@ -296,13 +318,15 @@ export function DayModal({
             disabled={isSaving || !canRegisterJigeun}
             onClick={() => register("지근")}
             title={
-              jigeunBlockedByLottery
-                ? "추첨에서 탈락한 날짜라 다시 신청할 수 없습니다"
-                : jigeunFull
-                  ? enforceJigeunCap
-                    ? "지근 정원이 모두 찼습니다"
-                    : "지근 정원이 모두 찼습니다 — 등록 시 정원 초과"
-                  : undefined
+              designatedJigeun
+                ? "지정근무(지(주)/지(야))로 지정된 날짜라 지근을 신청할 수 없습니다"
+                : jigeunBlockedByLottery
+                  ? "추첨에서 탈락한 날짜라 다시 신청할 수 없습니다"
+                  : jigeunFull
+                    ? enforceJigeunCap
+                      ? "지근 정원이 모두 찼습니다"
+                      : "지근 정원이 모두 찼습니다 — 등록 시 정원 초과"
+                    : undefined
             }
           >
             지근 신청

@@ -146,6 +146,26 @@ export function getJigeunBadgeLabel(kind: JigeunKind): string {
   return kind === "day" ? "지(주)" : "지(야)";
 }
 
+// 화면에 지정근무('지(주)' / '지(야)')로 표시되는 날인지. 위 주석의 두 경로를
+// 모두 본다:
+//  1) 주간·야간 지정근무 번호 (getJigeunKind !== null)
+//  2) 운휴대기 연휴 짝 치환 결과가 '지(주)'/'지(야)'(및 이튿날 '~') 인 경우
+// 이미 지정근무가 걸린 날이라 지근을 또 신청하면 중복이 되므로 신청을 막는다.
+// turn 은 반드시 '치환 후'(displayTurnMap) 값이어야 셀의 배지와 기준이 같다.
+// 지휴 신청은 대상이 아니다 — 정원과 무관하므로 막지 않는다.
+export function isDesignatedJigeunDisplay(
+  turn: string | null | undefined,
+  s: JigeunTurnSettings
+): boolean {
+  if (!turn) return false;
+  if (isJigeunTurn(turn, s)) return true;
+  // 연휴 짝의 이튿날('지(주)~', '지(야)~')까지 포함해 막는다.
+  return (
+    turn.startsWith(getJigeunBadgeLabel("day")) ||
+    turn.startsWith(getJigeunBadgeLabel("night"))
+  );
+}
+
 // 같은 근무번호가 주간·야간에 동시에 들어가면 판정이 모호해지므로 저장 시 차단.
 export function validateJigeunTurns(
   dayTurns: string[],

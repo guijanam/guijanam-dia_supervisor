@@ -21,6 +21,7 @@ import {
   parseHolidayTurnRulesText,
   getJigeunKind,
   getJigeunBadgeLabel,
+  isDesignatedJigeunDisplay,
 } from "@/lib/types";
 import {
   getCalendarGrid,
@@ -588,6 +589,16 @@ export function AdminEmployeeCalendarView({
         }
         existing={selectedDate ? specialMap.get(selectedDate) ?? null : null}
         lostOnDate={selectedDate ? lostDates.has(selectedDate) : false}
+        // 셀의 지정근무 배지와 같은 값으로 판정한다. enforceJigeunCap=false 라
+        // 안내만 뜨고 등록은 막지 않는다 — 판단은 관리자 몫.
+        designatedJigeun={
+          selectedDate
+            ? isDesignatedJigeunDisplay(
+                displayTurnMap.get(selectedDate),
+                jigeunTurns
+              )
+            : false
+        }
         allEntries={selectedDate ? allEntriesMap.get(selectedDate) ?? [] : []}
         // 관리자는 신청 마감일·추가 신청일과 무관하게 등록·삭제 모두 가능하다.
         phase="open"
