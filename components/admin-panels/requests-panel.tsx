@@ -12,6 +12,7 @@ import type {
   HolidayTurnRule,
   JigeunTurnSettings,
   JigeunKind,
+  ExcelFillColors,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
@@ -21,6 +22,7 @@ import {
   DEFAULT_OFFICE_NAME,
   parseTurnsText,
   parseHolidayTurnRulesText,
+  parseExcelFillColorsText,
   getJigeunKind,
   getJigeunBadgeLabel,
 } from "@/lib/types";
@@ -101,6 +103,7 @@ export interface SettingsSnapshot {
   weekendHolidayTurns: string[];
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
+  excelColors: ExcelFillColors;
   officeName: string;
   extraRequestDeadline: string | null;
   extraRequestYear: number | null;
@@ -185,7 +188,7 @@ export function RequestsPanel({
         fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("app_settings")
-          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, office_name, extra_request_deadline, extra_request_year, extra_request_quarter")
+          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, excel_fill_colors, office_name, extra_request_deadline, extra_request_year, extra_request_quarter")
           .eq("id", 1)
           .maybeSingle(),
         supabase
@@ -208,6 +211,7 @@ export function RequestsPanel({
         jigeun_day_turns: string | null;
         jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
+        excel_fill_colors: string | null;
         office_name: string | null;
         extra_request_deadline: string | null;
         extra_request_year: number | null;
@@ -243,6 +247,7 @@ export function RequestsPanel({
         weekendHolidayTurns: turns,
         jigeunTurns: loadedJigeunTurns,
         holidayTurnRules: holidayRules,
+        excelColors: parseExcelFillColorsText(s?.excel_fill_colors),
         officeName: s?.office_name ?? DEFAULT_OFFICE_NAME,
         extraRequestDeadline: s?.extra_request_deadline ?? null,
         extraRequestYear: s?.extra_request_year ?? null,

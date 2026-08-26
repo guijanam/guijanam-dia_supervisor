@@ -245,6 +245,99 @@ export function validateHolidayTurnRulesText(raw: string): string | null {
   return null;
 }
 
+// 엑셀(월간·분기 근무표) 셀 배경색. 관리자가 설정 화면에서 지정한다.
+// 키는 getTurnExcelFill 의 분기와 1:1 로 대응한다(우선순위도 그 순서).
+// 값은 ExcelJS 가 쓰는 8자리 ARGB('FF' + RRGGBB) 대문자.
+export interface ExcelFillColors {
+  jigeun: string; // 신청 지근
+  jihyu: string; // 신청 지휴
+  rest: string; // 휴무·운휴
+  substituted: string; // 운휴대기 치환
+  designated: string; // 지정근무
+}
+
+// 설정이 없을 때 쓰는 기본색 — 이 기능이 생기기 전 하드코딩되어 있던 값이라
+// 관리자가 아무것도 지정하지 않으면 기존 엑셀과 색이 똑같이 나온다.
+export const DEFAULT_EXCEL_FILL_COLORS: ExcelFillColors = {
+  jigeun: "FF7DD3FC", // sky-300
+  jihyu: "FFFCA5A5", // red-300
+  rest: "FFFEE2E2", // red-100
+  substituted: "FFE0F2FE", // sky-100
+  designated: "FFE0F2FE", // sky-100
+};
+
+// 설정 화면 라벨. 저장 순서·표시 순서를 이 배열 하나로 맞춘다.
+export const EXCEL_FILL_COLOR_FIELDS: {
+  key: keyof ExcelFillColors;
+  label: string;
+}[] = [
+  { key: "jigeun", label: "신청 지근" },
+  { key: "jihyu", label: "신청 지휴" },
+  { key: "rest", label: "휴무·운휴" },
+  { key: "substituted", label: "운휴대기 치환" },
+  { key: "designated", label: "지정근무" },
+];
+
+// '#7DD3FC' / '7dd3fc' / 'FF7DD3FC' 를 모두 받아 ExcelJS 용 8자리 대문자
+// ARGB 로 정규화한다. 형식이 틀리면 null.
+// (<input type="color"> 는 '#rrggbb' 를 주고, DB 에는 ARGB 로 저장한다.)
+export function normalizeHexColor(
+  raw: string | null | undefined
+): string | null {
+  if (!raw) return null;
+  const hex = raw.trim().replace(/^#/, "").toUpperCase();
+  if (/^[0-9A-F]{6}$/.test(hex)) return `FF${hex}`;
+  if (/^[0-9A-F]{8}$/.test(hex)) return hex;
+  return null;
+}
+
+// ARGB('FF7DD3FC') → <input type="color"> 용 '#7DD3FC'. 알파는 버린다.
+export function toHtmlColor(argb: string): string {
+  return `#${argb.slice(-6)}`;
+}
+
+// 'jigeun:FF7DD3FC;jihyu:FFFCA5A5;…' ↔ ExcelFillColors
+// 깨진 항목은 조용히 기본값으로 대체한다(전체 실패 금지 — 색 설정 하나가
+// 잘못 저장되어 전 직원 근무표를 못 받게 만들면 안 됨).
+// parseHolidayTurnRulesText 와 같은 방침.
+export function parseExcelFillColorsText(
+  raw: string | null | undefined
+): ExcelFillColors {
+  const colors = { ...DEFAULT_EXCEL_FILL_COLORS };
+  if (!raw) return colors;
+  for (const group of raw.split(";")) {
+    const g = group.trim();
+    if (!g) continue;
+    const i = g.indexOf(":");
+    if (i < 0) continue;
+    const key = g.slice(0, i).trim() as keyof ExcelFillColors;
+    if (!(key in colors)) continue;
+    const argb = normalizeHexColor(g.slice(i + 1));
+    if (argb) colors[key] = argb;
+  }
+  return colors;
+}
+
+export function formatExcelFillColorsText(colors: ExcelFillColors): string {
+  return EXCEL_FILL_COLOR_FIELDS.map((f) => `${f.key}:${colors[f.key]}`).join(
+    ";"
+  );
+}
+
+// 관리자 저장 시 보여줄 검증 메시지. null 이면 통과.
+// 값이 하나라도 색 형식이 아니면 저장을 막는다 — parse 는 조용히 기본값으로
+// 되돌리므로, 저장 시점에 걸러주지 않으면 "저장했는데 색이 안 바뀐다" 가 된다.
+export function validateExcelFillColors(
+  colors: ExcelFillColors
+): string | null {
+  for (const f of EXCEL_FILL_COLOR_FIELDS) {
+    if (!normalizeHexColor(colors[f.key])) {
+      return `${f.label} 색상이 올바르지 않습니다.`;
+    }
+  }
+  return null;
+}
+
 // 쉼표 텍스트('31,32,33') ↔ 배열 변환 유틸. 공백/빈 토큰은 제거.
 export function parseTurnsText(raw: string | null | undefined): string[] {
   if (!raw) return [];

@@ -588,3 +588,23 @@ alter table public.app_settings
 alter table public.app_settings
   add column if not exists extra_request_quarter integer
     check (extra_request_quarter between 1 and 4);
+
+-- ============================================================
+-- 22) 엑셀 배경색 설정 -----------------------------------------
+--  [배경]
+--  월간·분기 근무표 엑셀의 셀 배경색은 lib/schedule-utils.ts 의
+--  getTurnExcelFill 에 ARGB 5개가 하드코딩되어 있었다. 승무소마다 원하는
+--  색이 달라 코드 수정 없이 관리자가 지정할 수 있게 한다.
+--
+--  - 형식: 'jigeun:FF7DD3FC;jihyu:FFFCA5A5;rest:FFFEE2E2;substituted:FFE0F2FE;designated:FFE0F2FE'
+--    ('키:ARGB' 를 ';' 로 구분. holiday_turn_rules 와 같은 방식이라
+--     색 항목이 늘어도 마이그레이션이 더 필요 없다.)
+--  - 값은 ExcelJS 가 쓰는 8자리 ARGB('FF' + RRGGBB) 대문자.
+--  - NULL 이면 기본색(이 기능 이전과 동일한 색)을 쓴다. 깨진 항목도 개별적으로
+--    기본색으로 대체된다 — 색 설정 하나가 잘못되어 전 직원 근무표를 못 받는
+--    일이 없도록 parseExcelFillColorsText 가 전체 실패시키지 않는다.
+--  - 적용 대상은 엑셀뿐이다. 달력 화면 색(getTurnColorClass)은 Tailwind
+--    클래스 기반이라 이 설정을 쓰지 않는다.
+-- ============================================================
+alter table public.app_settings
+  add column if not exists excel_fill_colors text;

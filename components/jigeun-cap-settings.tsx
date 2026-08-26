@@ -7,17 +7,24 @@ import type {
   JigeunCaps,
   HolidayTurnRule,
   JigeunTurnSettings,
+  ExcelFillColors,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
+  DEFAULT_EXCEL_FILL_COLORS,
+  EXCEL_FILL_COLOR_FIELDS,
   parseTurnsText,
   formatTurnsText,
   parseHolidayTurnRulesText,
   formatHolidayTurnRulesText,
+  formatExcelFillColorsText,
   validateHolidayTurnRulesText,
   validateJigeunTurns,
+  validateExcelFillColors,
+  normalizeHexColor,
+  toHtmlColor,
 } from "@/lib/types";
 import { QUARTERS } from "@/lib/quarter";
 import {
@@ -44,6 +51,7 @@ interface Props {
   weekendHolidayTurns: string[];
   jigeunTurns: JigeunTurnSettings;
   holidayTurnRules: HolidayTurnRule[];
+  excelColors: ExcelFillColors;
   officeName: string;
   extraDeadline: string | null;
   extraYear: number | null;
@@ -57,6 +65,7 @@ export function JigeunCapSettings({
   weekendHolidayTurns,
   jigeunTurns,
   holidayTurnRules,
+  excelColors,
   officeName,
   extraDeadline,
   extraYear,
@@ -82,6 +91,8 @@ export function JigeunCapSettings({
   const [draftHolidayRulesText, setDraftHolidayRulesText] = useState<string>(
     formatHolidayTurnRulesText(holidayTurnRules)
   );
+  const [draftExcelColors, setDraftExcelColors] =
+    useState<ExcelFillColors>(excelColors);
   const [draftOfficeName, setDraftOfficeName] = useState<string>(officeName);
   const [draftExtraDeadline, setDraftExtraDeadline] = useState<string>(
     extraDeadline ?? ""
@@ -104,6 +115,7 @@ export function JigeunCapSettings({
       setDraftDayTurnsText(formatTurnsText(jigeunTurns.dayTurns));
       setDraftNightTurnsText(formatTurnsText(jigeunTurns.nightTurns));
       setDraftHolidayRulesText(formatHolidayTurnRulesText(holidayTurnRules));
+      setDraftExcelColors(excelColors);
       setDraftOfficeName(officeName);
       setDraftExtraDeadline(extraDeadline ?? "");
       setDraftExtraYear(extraYear != null ? String(extraYear) : "");
@@ -117,6 +129,7 @@ export function JigeunCapSettings({
     weekendHolidayTurns,
     jigeunTurns,
     holidayTurnRules,
+    excelColors,
     officeName,
     extraDeadline,
     extraYear,
@@ -150,6 +163,14 @@ export function JigeunCapSettings({
     );
     if (jigeunError) {
       setError(jigeunError);
+      return;
+    }
+
+    // 색 형식이 깨지면 parse 가 조용히 기본색으로 되돌린다 —
+    // "저장했는데 색이 안 바뀐다" 가 되므로 저장 전에 막는다.
+    const colorError = validateExcelFillColors(draftExcelColors);
+    if (colorError) {
+      setError(colorError);
       return;
     }
 
@@ -197,6 +218,7 @@ export function JigeunCapSettings({
           holiday_turn_rules: formatHolidayTurnRulesText(
             normalizedHolidayRules
           ),
+          excel_fill_colors: formatExcelFillColorsText(draftExcelColors),
           office_name: draftOfficeName.trim(),
           // 날짜를 비우면 년·분기도 함께 NULL 로 되돌린다.
           extra_request_deadline: draftExtraDeadline ? draftExtraDeadline : null,
@@ -453,6 +475,48 @@ export function JigeunCapSettings({
                 원래 근무번호 기준 그대로입니다.
               </p>
             </div>
+
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">엑셀 배경색</label>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  disabled={isSaving}
+                  onClick={() => setDraftExcelColors(DEFAULT_EXCEL_FILL_COLORS)}
+                >
+                  기본색으로
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-1">
+                {EXCEL_FILL_COLOR_FIELDS.map((f) => (
+                  <label
+                    key={f.key}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <input
+                      type="color"
+                      className="h-8 w-10 shrink-0 cursor-pointer rounded border bg-transparent p-0.5 disabled:cursor-not-allowed"
+                      value={toHtmlColor(draftExcelColors[f.key])}
+                      disabled={isSaving}
+                      onChange={(e) => {
+                        const argb = normalizeHexColor(e.target.value);
+                        if (!argb) return;
+                        setDraftExcelColors((c) => ({ ...c, [f.key]: argb }));
+                      }}
+                    />
+                    <span className="truncate">{f.label}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground pt-1">
+                월간·분기 <b>엑셀 다운로드</b>의 셀 배경색입니다(달력 화면 색은
+                바뀌지 않습니다). 한 칸이 여러 조건에 해당하면 위 목록의 순서대로
+                앞선 색이 적용됩니다 — 예를 들어 지정근무인 날에 지근을 신청하면
+                <b> 신청 지근</b> 색으로 칠해집니다. 글씨가 검정이므로 너무 어두운
+                색은 피하세요.
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 gap-2 pt-4 border-t">
@@ -466,6 +530,7 @@ export function JigeunCapSettings({
                 setDraftHolidayRulesText(
                   formatHolidayTurnRulesText(DEFAULT_HOLIDAY_TURN_RULES)
                 );
+                setDraftExcelColors(DEFAULT_EXCEL_FILL_COLORS);
               }}
               disabled={isSaving}
               title="기본값(정원 4/2/4/4, 운휴 31~37)으로 되돌리기"

@@ -6,11 +6,13 @@ import type {
   JigeunTurnSettings,
   RecordType,
   LotteryStatus,
+  ExcelFillColors,
 } from "./types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
+  DEFAULT_EXCEL_FILL_COLORS,
   HOLIDAY_PAIR_REQUIRED_DAYS,
   isJigeunTurn,
 } from "./types";
@@ -180,12 +182,13 @@ export function getTurnColorClass(
 }
 
 // getTurnColorClass 의 엑셀(ExcelJS) 버전. 색이 없으면 null.
-// 우선순위: 사용자가 신청한 지근/지휴 > 휴무·운휴(빨강) > 운휴대기 치환(하늘) > 지정근무(하늘).
+// 우선순위: 사용자가 신청한 지근/지휴 > 휴무·운휴 > 운휴대기 치환 > 지정근무.
+// 이 분기 순서가 곧 우선순위이며, 색만 설정으로 빠졌을 뿐 순서는 고정이다.
 //
-// 신청(special)이 가장 우선이다. 신청 칸은 옅은 색과 확실히 구별되도록 진한 색을 쓴다:
-//   - 지근: 진한 파랑(sky-300) — 지정근무·운휴대기의 옅은 하늘색(sky-100)과 구별.
-//   - 지휴: 진한 빨강(red-300) — 일반 휴무·운휴의 옅은 빨강(red-100)과 구별.
-// 진한 바탕에서도 검은 글씨가 읽히도록 300 계열까지만 쓴다.
+// 색은 관리자가 설정 화면에서 지정한 colors 를 쓴다(미지정 시
+// DEFAULT_EXCEL_FILL_COLORS — 이 기능이 생기기 전과 같은 색).
+// 신청(special)이 가장 우선이다. 기본값은 신청 칸이 옅은 색과 확실히 구별되도록
+// 진한 색(300 계열)을 쓰지만, 관리자가 바꾸면 그 대비는 관리자 책임이다.
 //
 // isRest 는 호출부에서 isHueTurnOnDate + 주말운휴로 이미 판정한 값을 넘긴다.
 // turnText 는 '치환 후' 근무번호여야 셀의 지(주)/지(야) 배지와 기준이 일치한다.
@@ -196,13 +199,14 @@ export function getTurnExcelFill(
   isRest: boolean,
   isSubstituted: boolean,
   jigeunTurns: JigeunTurnSettings = DEFAULT_JIGEUN_TURNS,
-  special?: RecordType | null
+  special?: RecordType | null,
+  colors: ExcelFillColors = DEFAULT_EXCEL_FILL_COLORS
 ): string | null {
-  if (special === "지근") return "FF7DD3FC"; // sky-300
-  if (special === "지휴") return "FFFCA5A5"; // red-300
-  if (isRest) return "FFFEE2E2"; // red-100
-  if (isSubstituted) return "FFE0F2FE"; // sky-100
-  if (isJigeunTurn(turnText, jigeunTurns)) return "FFE0F2FE"; // sky-100
+  if (special === "지근") return colors.jigeun;
+  if (special === "지휴") return colors.jihyu;
+  if (isRest) return colors.rest;
+  if (isSubstituted) return colors.substituted;
+  if (isJigeunTurn(turnText, jigeunTurns)) return colors.designated;
   return null;
 }
 

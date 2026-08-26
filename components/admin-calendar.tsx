@@ -11,14 +11,17 @@ import type {
   JigeunCaps,
   HolidayTurnRule,
   JigeunTurnSettings,
+  ExcelFillColors,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
+  DEFAULT_EXCEL_FILL_COLORS,
   parseTurnsText,
   parseHolidayTurnRulesText,
+  parseExcelFillColorsText,
 } from "@/lib/types";
 import {
   getCalendarGrid,
@@ -139,6 +142,10 @@ export function AdminCalendar() {
   const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
     DEFAULT_HOLIDAY_TURN_RULES
   );
+  // 엑셀(월간·분기) 셀 배경색. 관리자 설정값이며 화면 색에는 쓰지 않는다.
+  const [excelColors, setExcelColors] = useState<ExcelFillColors>(
+    DEFAULT_EXCEL_FILL_COLORS
+  );
   const [reschedTarget, setReschedTarget] = useState<SpecialEntry | null>(null);
 
   // 선택한 날짜에 즉시 지근/지휴를 신규 등록하기 위한 인라인 폼 상태
@@ -258,7 +265,7 @@ export function AdminCalendar() {
           supabase
             .from("app_settings")
             .select(
-              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules"
+              "jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, excel_fill_colors"
             )
             .eq("id", 1)
             .maybeSingle(),
@@ -275,6 +282,7 @@ export function AdminCalendar() {
         jigeun_day_turns: string | null;
         jigeun_night_turns: string | null;
         holiday_turn_rules: string | null;
+        excel_fill_colors: string | null;
       } | null;
       setCaps(
         s
@@ -297,6 +305,8 @@ export function AdminCalendar() {
             }
           : DEFAULT_JIGEUN_TURNS
       );
+      // 값이 없거나 깨져 있으면 parse 가 기본색을 돌려준다 — 엑셀은 항상 받아진다.
+      setExcelColors(parseExcelFillColorsText(s?.excel_fill_colors));
       const holidayRules = s
         ? parseHolidayTurnRulesText(s.holiday_turn_rules)
         : DEFAULT_HOLIDAY_TURN_RULES;
@@ -733,17 +743,18 @@ export function AdminCalendar() {
         // 운휴대기 칸은 두 줄이라 줄바꿈을 켠다.
         row.alignment = { horizontal: "center", wrapText: true };
         row.getCell(2).alignment = { horizontal: "left" };
-        // 배경색 규칙은 getTurnExcelFill 에 모아둔다.
-        // 신청한 지근(진한 파랑)·지휴(진한 빨강)가 최우선, 그 다음 휴무·운휴(옅은 빨강),
-        // 운휴대기 치환과 지정근무(옅은 하늘색).
-        // isRest 는 이미 치환 후 값 기준이라 휴77 등은 빨강이 된다.
+        // 배경색 규칙은 getTurnExcelFill 에 모아둔다. 우선순위는
+        // 신청 지근·지휴 > 휴무·운휴 > 운휴대기 치환 > 지정근무이고,
+        // 실제 색은 관리자 설정(excelColors)에서 온다.
+        // isRest 는 이미 치환 후 값 기준이라 휴77 등은 휴무색이 된다.
         cells.forEach((c, i) => {
           const argb = getTurnExcelFill(
             c.turn,
             c.isRest,
             c.isSubstituted,
             jigeunTurns,
-            c.special
+            c.special,
+            excelColors
           );
           if (argb) {
             row.getCell(i + 4).fill = {
@@ -844,7 +855,8 @@ export function AdminCalendar() {
               c.isRest,
               c.isSubstituted,
               jigeunTurns,
-              c.special
+              c.special,
+              excelColors
             );
             if (argb) {
               row.getCell(i + FIXED_COLS + 1).fill = {

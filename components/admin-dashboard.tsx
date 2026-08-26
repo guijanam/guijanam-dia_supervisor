@@ -6,12 +6,14 @@ import type {
   JigeunCaps,
   HolidayTurnRule,
   JigeunTurnSettings,
+  ExcelFillColors,
 } from "@/lib/types";
 import {
   DEFAULT_JIGEUN_CAPS,
   DEFAULT_WEEKEND_HOLIDAY_TURNS,
   DEFAULT_JIGEUN_TURNS,
   DEFAULT_HOLIDAY_TURN_RULES,
+  DEFAULT_EXCEL_FILL_COLORS,
   DEFAULT_OFFICE_NAME,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -99,6 +101,9 @@ export function AdminDashboard() {
   const [holidayTurnRules, setHolidayTurnRules] = useState<HolidayTurnRule[]>(
     DEFAULT_HOLIDAY_TURN_RULES
   );
+  const [excelColors, setExcelColors] = useState<ExcelFillColors>(
+    DEFAULT_EXCEL_FILL_COLORS
+  );
   const [officeName, setOfficeName] = useState<string>(DEFAULT_OFFICE_NAME);
   const [extraDeadline, setExtraDeadline] = useState<string | null>(null);
   const [extraYear, setExtraYear] = useState<number | null>(null);
@@ -158,6 +163,7 @@ export function AdminDashboard() {
             weekendHolidayTurns={weekendHolidayTurns}
             jigeunTurns={jigeunTurns}
             holidayTurnRules={holidayTurnRules}
+            excelColors={excelColors}
             officeName={officeName}
             extraDeadline={extraDeadline}
             extraYear={extraYear}
@@ -239,6 +245,7 @@ export function AdminDashboard() {
                 setWeekendHolidayTurns(s.weekendHolidayTurns);
                 setJigeunTurns(s.jigeunTurns);
                 setHolidayTurnRules(s.holidayTurnRules);
+                setExcelColors(s.excelColors);
                 setOfficeName(s.officeName);
                 setExtraDeadline(s.extraRequestDeadline);
                 setExtraYear(s.extraRequestYear);
