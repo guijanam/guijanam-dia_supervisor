@@ -823,29 +823,9 @@ export function AdminCalendar() {
           });
           quarterTotal += monthRestTotal(totals);
 
-          // 요일 행: 그 달의 실제 요일을 열 위치에 맞춰 적는다.
-          const dayRow = ws.addRow([
-            "",
-            "",
-            "",
-            "",
-            "",
-            ...dayNumbers.map((n) => {
-              const date = maps.dates[n - 1];
-              return date ? `(${getDayName(date)})` : "";
-            }),
-          ]);
-          dayRow.alignment = { horizontal: "center" };
-          dayNumbers.forEach((n, i) => {
-            const date = maps.dates[n - 1];
-            if (!date) return;
-            const color = getDayExcelColor(date, maps.holidaySet);
-            dayRow.getCell(i + FIXED_COLS + 1).font = color
-              ? { bold: true, color: { argb: color } }
-              : { bold: true };
-          });
-
           // 데이터 행: 월 라벨 + 그 달 휴무수 + 근무 칸.
+          // (달마다 붙던 요일 행은 없앴다 — 열 머리글의 '1일~31일'로 충분하고,
+          //  달이 늘어날수록 행이 두 배가 되어 보기 어려웠다.)
           const monthLabel = `${Number(monthValues[mi].slice(5, 7))}월`;
           const row = ws.addRow([
             "",
