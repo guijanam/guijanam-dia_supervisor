@@ -106,8 +106,11 @@ export interface SettingsSnapshot {
   excelColors: ExcelFillColors;
   officeName: string;
   extraRequestDeadline: string | null;
+  // 대상 분기 — 추가 신청 자격 판정과 자동 추첨이 함께 쓴다.
   extraRequestYear: number | null;
   extraRequestQuarter: number | null;
+  autoLotteryEnabled: boolean;
+  autoLotteryDoneFor: string | null;
 }
 
 interface RequestsPanelProps {
@@ -188,7 +191,7 @@ export function RequestsPanel({
         fetchScheduleByRange(padded.start, padded.end),
         supabase
           .from("app_settings")
-          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, excel_fill_colors, office_name, extra_request_deadline, extra_request_year, extra_request_quarter")
+          .select("jigeun_cap_weekday, jigeun_cap_saturday, jigeun_cap_sunday, jigeun_cap_holiday, request_freeze_date, weekend_holiday_turns, jigeun_day_turns, jigeun_night_turns, holiday_turn_rules, excel_fill_colors, office_name, extra_request_deadline, extra_request_year, extra_request_quarter, auto_lottery_enabled, auto_lottery_done_for")
           .eq("id", 1)
           .maybeSingle(),
         supabase
@@ -216,6 +219,8 @@ export function RequestsPanel({
         extra_request_deadline: string | null;
         extra_request_year: number | null;
         extra_request_quarter: number | null;
+        auto_lottery_enabled: boolean | null;
+        auto_lottery_done_for: string | null;
       } | null;
       const caps = s
         ? {
@@ -252,6 +257,8 @@ export function RequestsPanel({
         extraRequestDeadline: s?.extra_request_deadline ?? null,
         extraRequestYear: s?.extra_request_year ?? null,
         extraRequestQuarter: s?.extra_request_quarter ?? null,
+        autoLotteryEnabled: s?.auto_lottery_enabled ?? false,
+        autoLotteryDoneFor: s?.auto_lottery_done_for ?? null,
       });
 
       // 연휴 짝 치환 판정에 필요 — state 반영 전에 로컬 Set 으로 먼저 사용

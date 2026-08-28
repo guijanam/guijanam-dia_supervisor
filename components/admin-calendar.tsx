@@ -43,6 +43,13 @@ import {
 } from "@/lib/schedule-excel";
 import type { MonthMaps } from "@/lib/schedule-excel";
 import { quarterEndOf, quarterMonths } from "@/lib/quarter";
+import {
+  POSITIONS,
+  drawIds,
+  collectBulkTargets,
+  type Position,
+  type BulkTarget,
+} from "@/lib/auto-lottery";
 import { useMonthState } from "@/lib/use-month-state";
 import { lostWarningSuffix } from "@/lib/lottery-warning";
 import { startOfMonth, endOfMonth, format } from "date-fns";
@@ -74,9 +81,6 @@ import { AdminEmployeeCalendarView } from "@/components/admin-employee-calendar-
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
-const POSITIONS = ["기관사", "차장"] as const;
-type Position = (typeof POSITIONS)[number];
-
 interface SpecialEntry {
   id: string;
   staff_id: number;
@@ -94,32 +98,6 @@ interface SpecialEntry {
 // (countJigeunSlots 주석 참고) — 추첨을 돌리면 초과 표시가 풀린다.
 function countJigeun(entries: SpecialEntry[], pos: Position): number {
   return countJigeunSlots(entries.filter((e) => e.staff_position === pos));
-}
-
-// pool 에서 cap 명을 무작위로 당첨시키고 나머지를 탈락으로 가른다 (Fisher-Yates).
-// 개별 추첨(runLottery)과 월 일괄 추첨(runBulkLottery)이 이 하나를 공유한다.
-function drawIds(
-  pool: SpecialEntry[],
-  cap: number
-): { wonIds: string[]; lostIds: string[] } {
-  const shuffled = [...pool];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  const winners = new Set(shuffled.slice(0, cap).map((e) => e.id));
-  return {
-    wonIds: pool.filter((e) => winners.has(e.id)).map((e) => e.id),
-    lostIds: pool.filter((e) => !winners.has(e.id)).map((e) => e.id),
-  };
-}
-
-// 월 일괄 추첨 대상 한 건 = (날짜 × 직책) 조합.
-interface BulkTarget {
-  date: string;
-  pos: Position;
-  cap: number;
-  pool: SpecialEntry[]; // 그 날 그 직책의 지근 신청 전체
 }
 
 export function AdminCalendar() {
@@ -206,34 +184,12 @@ export function AdminCalendar() {
   }, [specialMap, holidays, caps]);
 
   // 이 달에서 '아직 추첨하지 않은' 정원 초과 (날짜 × 직책) 목록.
-  // 추첨 흔적(lottery_status)이 하나라도 있는 조합은 제외한다 — 일괄 실행으로
-  // 기존 당첨자가 뒤집히는 사고를 막기 위해서다. 재추첨이 필요하면 날짜 셀
-  // 다이얼로그의 개별 '재추첨' 버튼을 쓴다.
-  const bulkTargets = useMemo<BulkTarget[]>(() => {
-    const list: BulkTarget[] = [];
-    for (const [date, entries] of specialMap) {
-      const cap = getPositionCap(date, holidays, caps);
-      for (const pos of POSITIONS) {
-        const group = entries.filter((e) => e.staff_position === pos);
-        if (group.some((e) => e.lottery_status != null)) continue;
-        // 다이얼로그의 isOver 와 같은 기준으로 초과를 판정한다.
-        if (countJigeunSlots(group) <= cap) continue;
-        list.push({
-          date,
-          pos,
-          cap,
-          pool: group.filter((e) => e.record_type === "지근"),
-        });
-      }
-    }
-    // 날짜 오름차순 → 같은 날짜면 POSITIONS 순서
-    list.sort(
-      (a, b) =>
-        a.date.localeCompare(b.date) ||
-        POSITIONS.indexOf(a.pos) - POSITIONS.indexOf(b.pos)
-    );
-    return list;
-  }, [specialMap, holidays, caps]);
+  // 판정 규칙은 자동 추첨과 공유한다(lib/auto-lottery.ts) — 두 벌로 두면
+  // '이미 추첨한 조합 제외' 같은 규칙이 어긋나는 순간 결과가 갈린다.
+  const bulkTargets = useMemo<BulkTarget<SpecialEntry>[]>(
+    () => collectBulkTargets(specialMap, holidays, caps),
+    [specialMap, holidays, caps]
+  );
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);

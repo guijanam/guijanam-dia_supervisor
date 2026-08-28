@@ -56,6 +56,7 @@ interface Props {
   extraDeadline: string | null;
   extraYear: number | null;
   extraQuarter: number | null;
+  autoLotteryEnabled: boolean;
   onSaved: () => void;
 }
 
@@ -70,6 +71,7 @@ export function JigeunCapSettings({
   extraDeadline,
   extraYear,
   extraQuarter,
+  autoLotteryEnabled,
   onSaved,
 }: Props) {
   const { isAdmin, employee } = useAuth();
@@ -103,6 +105,8 @@ export function JigeunCapSettings({
   const [draftExtraQuarter, setDraftExtraQuarter] = useState<string>(
     extraQuarter != null ? String(extraQuarter) : ""
   );
+  const [draftAutoLottery, setDraftAutoLottery] =
+    useState<boolean>(autoLotteryEnabled);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,6 +124,7 @@ export function JigeunCapSettings({
       setDraftExtraDeadline(extraDeadline ?? "");
       setDraftExtraYear(extraYear != null ? String(extraYear) : "");
       setDraftExtraQuarter(extraQuarter != null ? String(extraQuarter) : "");
+      setDraftAutoLottery(autoLotteryEnabled);
       setError(null);
     }
   }, [
@@ -134,6 +139,7 @@ export function JigeunCapSettings({
     extraDeadline,
     extraYear,
     extraQuarter,
+    autoLotteryEnabled,
   ]);
 
   if (!isAdmin || !employee) return null;
@@ -174,10 +180,20 @@ export function JigeunCapSettings({
       return;
     }
 
-    // 추가 신청일은 날짜·년·분기가 함께 있어야 판정이 가능하다.
-    // 셋 중 일부만 채우면 사용자 화면에서 조용히 무시되므로 여기서 막는다.
+    // 대상 분기(년·분기)는 추가 신청 자격 판정과 자동 추첨이 함께 쓴다.
+    // 추가 신청일이 있으면 판정에 필요하므로 년·분기가 반드시 있어야 하지만,
+    // 반대는 강제하지 않는다 — 추가 신청을 운영하지 않는 분기에도 대상 분기만
+    // 지정해 두면 자동 추첨이 동작해야 하기 때문이다.
     const extraYearNum = draftExtraYear ? Number(draftExtraYear) : null;
     const extraQuarterNum = draftExtraQuarter ? Number(draftExtraQuarter) : null;
+    if (extraYearNum && !extraQuarterNum) {
+      setError("대상 분기의 분기를 선택하세요.");
+      return;
+    }
+    if (extraQuarterNum && !extraYearNum) {
+      setError("대상 분기의 년도를 입력하세요.");
+      return;
+    }
     if (draftExtraDeadline) {
       if (!extraYearNum || !extraQuarterNum) {
         setError("추가 신청일을 쓰려면 대상 분기의 년·분기도 함께 지정하세요.");
@@ -192,8 +208,13 @@ export function JigeunCapSettings({
         setError("추가 신청일은 신청 마감일보다 뒤여야 합니다.");
         return;
       }
-    } else if (extraYearNum || extraQuarterNum) {
-      setError("추가 신청일을 비우려면 년·분기도 함께 비우세요.");
+    }
+    // 자동 추첨은 대상 분기 없이는 실행되지 않는다. 저장은 막지 않되,
+    // 켜 두고도 아무 일이 없는 상태가 되지 않도록 여기서 알려 준다.
+    if (draftAutoLottery && (!extraYearNum || !extraQuarterNum)) {
+      setError(
+        "자동 추첨을 켜려면 대상 분기(년·분기)를 지정하세요. 마감일에서 분기를 추론하지 않습니다."
+      );
       return;
     }
 
@@ -220,10 +241,12 @@ export function JigeunCapSettings({
           ),
           excel_fill_colors: formatExcelFillColorsText(draftExcelColors),
           office_name: draftOfficeName.trim(),
-          // 날짜를 비우면 년·분기도 함께 NULL 로 되돌린다.
           extra_request_deadline: draftExtraDeadline ? draftExtraDeadline : null,
-          extra_request_year: draftExtraDeadline ? extraYearNum : null,
-          extra_request_quarter: draftExtraDeadline ? extraQuarterNum : null,
+          // 대상 분기는 추가 신청일과 독립이다. 날짜를 비워도 남겨 두어야
+          // 추가 신청을 운영하지 않는 분기에서도 자동 추첨이 동작한다.
+          extra_request_year: extraYearNum,
+          extra_request_quarter: extraQuarterNum,
+          auto_lottery_enabled: draftAutoLottery,
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -330,33 +353,36 @@ export function JigeunCapSettings({
                 비우면 마감 없음. 마감일 다음날 0시부터 사용자의 지근/지휴
                 신청·삭제가 차단됩니다.
               </p>
+
+              <label className="flex items-start gap-2 pl-[4.75rem] pt-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                  checked={draftAutoLottery}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftAutoLottery(e.target.checked)}
+                />
+                <span className="text-xs">
+                  <b>
+                    마감일이 지나면 추첨을 자동 실행하고 결과를 문서로 게시
+                  </b>
+                  <br />
+                  <span className="text-muted-foreground">
+                    관리자가 앱에 접속한 시점에 1회 실행됩니다. 아래{" "}
+                    <b>대상 분기</b>를 추첨하며, 이미 추첨한 날짜는 건드리지
+                    않습니다.
+                  </span>
+                </span>
+              </label>
             </div>
 
+            {/* 대상 분기는 추가 신청 자격 판정과 자동 추첨이 함께 쓰는 값이라
+                추가 신청일과 분리해 위에 둔다. 마감일에서 추론하지 않는다 —
+                신청은 대상 분기보다 한두 달 앞서 받으므로 마감일은 항상 다른
+                분기에 속한다. */}
             <div className="flex flex-col gap-1 pt-2 border-t">
               <div className="flex items-center gap-3">
-                <label className="w-16 text-sm font-medium">추가 신청일</label>
-                <Input
-                  type="date"
-                  className="h-9"
-                  value={draftExtraDeadline}
-                  disabled={isSaving}
-                  onChange={(e) => setDraftExtraDeadline(e.target.value)}
-                />
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => {
-                    setDraftExtraDeadline("");
-                    setDraftExtraYear("");
-                    setDraftExtraQuarter("");
-                  }}
-                  disabled={isSaving || !draftExtraDeadline}
-                  title="추가 신청 기간 해제"
-                >
-                  해제
-                </Button>
-              </div>
-              <div className="flex items-center gap-3 pl-[4.75rem]">
+                <label className="w-16 text-sm font-medium">대상 분기</label>
                 <Input
                   type="number"
                   inputMode="numeric"
@@ -379,9 +405,48 @@ export function JigeunCapSettings({
                     </option>
                   ))}
                 </select>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    setDraftExtraYear("");
+                    setDraftExtraQuarter("");
+                  }}
+                  disabled={isSaving || (!draftExtraYear && !draftExtraQuarter)}
+                  title="대상 분기 해제"
+                >
+                  해제
+                </Button>
               </div>
               <p className="text-xs text-muted-foreground pl-[4.75rem]">
-                1차 마감 이후 이 날짜까지, 선택한 분기에서{" "}
+                지금 신청받아 처리 중인 분기입니다. <b>추가 신청</b> 자격 판정과{" "}
+                <b>자동 추첨</b>이 이 분기를 대상으로 합니다. 추가 신청을
+                운영하지 않아도 지정해 두면 자동 추첨이 동작합니다.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1 pt-2 border-t">
+              <div className="flex items-center gap-3">
+                <label className="w-16 text-sm font-medium">추가 신청일</label>
+                <Input
+                  type="date"
+                  className="h-9"
+                  value={draftExtraDeadline}
+                  disabled={isSaving}
+                  onChange={(e) => setDraftExtraDeadline(e.target.value)}
+                />
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setDraftExtraDeadline("")}
+                  disabled={isSaving || !draftExtraDeadline}
+                  title="추가 신청 기간 해제"
+                >
+                  해제
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground pl-[4.75rem]">
+                1차 마감 이후 이 날짜까지, 위 <b>대상 분기</b>에서{" "}
                 <b>추첨에 떨어진(탈락) 직원에게만</b> 지근/지휴 신청이 다시
                 열립니다. 떨어진 자리를 스스로 다시 잡게 하는 용도라 이 기간에는{" "}
                 <b>신청·삭제가 모두 가능</b>합니다. 비우면 추가 신청 기간 없음.
