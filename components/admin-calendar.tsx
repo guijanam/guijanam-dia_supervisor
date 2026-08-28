@@ -41,6 +41,7 @@ import {
   buildEmployeeMonthCells,
   monthRestTotal,
 } from "@/lib/schedule-excel";
+import type { MonthMaps } from "@/lib/schedule-excel";
 import { quarterEndOf, quarterMonths } from "@/lib/quarter";
 import { useMonthState } from "@/lib/use-month-state";
 import { lostWarningSuffix } from "@/lib/lottery-warning";
@@ -772,11 +773,53 @@ export function AdminCalendar() {
     await downloadWorkbook(wb, `월간근무표_${monthValue}.xlsx`);
   };
 
-  // 분기 병합 근무표 엑셀: 직책별 시트, 직원 1명 = 6행(월별 요일행 3 + 데이터행 3).
-  // 사번·이름·분기 총휴무는 그 6행에 걸쳐 세로 병합한다.
+  // 한 달치 지근/지휴 신청을 '날짜 → 신청자 명단' 으로 뒤집는다.
   //
-  // 달마다 날짜 수·요일이 다르므로 1~31일 열을 공유하되 월 블록마다 요일 행을
-  // 따로 둔다. 30일까지인 달은 31일 칸이 빈칸이 된다.
+  // maps.specialByStaff 는 직원 기준(staffId|date)이라 "이 날 누가 신청했나" 를
+  // 보려면 전 직원을 훑어야 한다. 신청현황 시트가 쓸 수 있게 날짜 기준으로 모은다.
+  // 추첨 탈락 건은 buildMonthMaps 가 이미 걸러내므로 여기서 다시 볼 필요가 없다 —
+  // 덕분에 근무표 시트와 명단이 자동으로 일치한다.
+  const buildRequestRoster = (
+    maps: MonthMaps,
+    employees: Array<{ staff_id: number; staff_name: string }>
+  ) => {
+    const roster = new Map<string, { 지근: string[]; 지휴: string[] }>();
+    for (const emp of employees) {
+      for (const date of maps.dates) {
+        const key = `${emp.staff_id}|${date}`;
+        const special = maps.specialByStaff.get(key);
+        if (!special) continue;
+        // 표기 규칙은 월간 신청현황 엑셀(requests-panel)과 맞춘다:
+        // 이름(근무번호), 운휴대기 치환 건은 이름(원래근무→대치근무).
+        const display = getTurnDisplay(
+          key,
+          maps.regularByStaff,
+          maps.displayByStaff
+        );
+        const turn = display
+          ? display.substituted
+            ? `${display.original}→${display.substituted}`
+            : display.original
+          : "";
+        let slot = roster.get(date);
+        if (!slot) {
+          slot = { 지근: [], 지휴: [] };
+          roster.set(date, slot);
+        }
+        slot[special].push(turn ? `${emp.staff_name}(${turn})` : emp.staff_name);
+      }
+    }
+    return roster;
+  };
+
+  // 분기 병합 근무표 엑셀: 직책별 시트, 직원 1명 = 3행(그 분기의 달마다 1행).
+  // 사번·이름·분기 총휴무는 그 3행에 걸쳐 세로 병합한다.
+  //
+  // 달마다 날짜 수가 다르므로 1~31일 열을 공유한다. 30일까지인 달은 31일 칸이
+  // 빈칸이 된다.
+  //
+  // 뒤이어 직책별 '신청현황' 시트를 붙인다 — 근무표는 직원별로 세로로 훑어야
+  // "이 날 누가 지근인지" 를 알 수 있어서, 날짜를 열로 세운 뷰를 따로 둔다.
   const exportQuarterExcel = async () => {
     if (!quarterInfo) return;
     const { year, quarter } = quarterInfo;
@@ -884,6 +927,82 @@ export function AdminCalendar() {
       }
 
       ws.views = [{ state: "frozen", xSplit: FIXED_COLS, ySplit: 1 }];
+    }
+
+    // 직책별 신청현황 시트. 근무표 시트 루프가 끝난 뒤에 따로 도는 이유는
+    // 탭 순서를 기관사·차장·기관사 신청현황·차장 신청현황 으로 두기 위해서다.
+    for (const pos of POSITIONS) {
+      const posEmployees = employees.filter((e) => e.staff_position === pos);
+      const ws = wb.addWorksheet(`${pos} 신청현황`);
+      ws.columns = [
+        { width: 10 },
+        { width: 10 },
+        ...dayNumbers.map(() => ({ width: 14 })),
+      ];
+
+      const headerRow = ws.addRow([
+        "월",
+        "구분",
+        ...dayNumbers.map((n) => `${n}일`),
+      ]);
+      headerRow.font = { bold: true };
+      headerRow.alignment = { horizontal: "center" };
+
+      monthMaps.forEach((maps, mi) => {
+        const roster = buildRequestRoster(maps, posEmployees);
+        const monthLabel = `${Number(monthValues[mi].slice(5, 7))}월`;
+        const blockStart = ws.rowCount + 1;
+
+        // 명단 2행(지근·지휴) + 건수 2행. 날짜 열은 1~31일 고정이라 그 달에
+        // 없는 날(예: 11월 31일)은 maps.dates 가 비어 빈칸이 된다.
+        for (const type of ["지근", "지휴"] as const) {
+          const row = ws.addRow([
+            "",
+            type,
+            ...dayNumbers.map((n) => {
+              const date = maps.dates[n - 1];
+              return date ? roster.get(date)?.[type].join("\n") ?? "" : "";
+            }),
+          ]);
+          row.getCell(2).font = { bold: true };
+          row.alignment = { wrapText: true, vertical: "top" };
+          // 열 머리글은 1일~31일 고정이라 요일을 붙일 수 없다(달마다 다르다).
+          // 대신 지근 행의 날짜 칸에 그 달 기준 요일 색을 넣어, 월 블록마다
+          // 자기 달의 주말·공휴일이 드러나게 한다.
+          if (type === "지근") {
+            dayNumbers.forEach((n, i) => {
+              const date = maps.dates[n - 1];
+              if (!date) return;
+              const color = getDayExcelColor(date, maps.holidaySet);
+              if (color) row.getCell(i + 3).font = { color: { argb: color } };
+            });
+          }
+        }
+
+        for (const type of ["지근", "지휴"] as const) {
+          const row = ws.addRow([
+            "",
+            `${type} 건수`,
+            ...dayNumbers.map((n) => {
+              const date = maps.dates[n - 1];
+              return date ? roster.get(date)?.[type].length ?? 0 : "";
+            }),
+          ]);
+          row.getCell(2).font = { bold: true };
+          row.alignment = { horizontal: "center" };
+        }
+
+        // 월 라벨을 그 블록 4행에 걸쳐 세로 병합.
+        const blockEnd = ws.rowCount;
+        ws.getCell(blockStart, 1).value = monthLabel;
+        ws.mergeCells(blockStart, 1, blockEnd, 1);
+        ws.getCell(blockStart, 1).alignment = {
+          vertical: "middle",
+          horizontal: "center",
+        };
+      });
+
+      ws.views = [{ state: "frozen", xSplit: 2, ySplit: 1 }];
     }
 
     await downloadWorkbook(wb, `분기근무표_${year}_${quarter}분기.xlsx`);
