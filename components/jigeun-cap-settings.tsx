@@ -209,8 +209,11 @@ export function JigeunCapSettings({
         return;
       }
     }
-    // 자동 추첨은 대상 분기 없이는 실행되지 않는다. 저장은 막지 않되,
-    // 켜 두고도 아무 일이 없는 상태가 되지 않도록 여기서 알려 준다.
+    if (draftAutoLottery && !draftFreezeDate) {
+      setError("자동 추첨을 켜려면 신청 마감일을 지정하세요.");
+      return;
+    }
+    // 서버 예약 작업이 실행할 대상 분기를 반드시 저장한다.
     if (draftAutoLottery && (!extraYearNum || !extraQuarterNum)) {
       setError(
         "자동 추첨을 켜려면 대상 분기(년·분기)를 지정하세요. 마감일에서 분기를 추론하지 않습니다."
@@ -247,6 +250,7 @@ export function JigeunCapSettings({
           extra_request_year: extraYearNum,
           extra_request_quarter: extraQuarterNum,
           auto_lottery_enabled: draftAutoLottery,
+          auto_lottery_admin_staff_id: draftAutoLottery ? employee.staff_id : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -368,9 +372,9 @@ export function JigeunCapSettings({
                   </b>
                   <br />
                   <span className="text-muted-foreground">
-                    관리자가 앱에 접속한 시점에 1회 실행됩니다. 아래{" "}
-                    <b>대상 분기</b>를 추첨하며, 이미 추첨한 날짜는 건드리지
-                    않습니다.
+                    한국 시간 기준 마감일 다음날 0시 이후, 서버가 매분 확인해
+                    관리자 접속 없이 1회 실행합니다. 아래 <b>대상 분기</b>를
+                    추첨하며, 이미 추첨한 날짜·직책의 결과는 유지합니다.
                   </span>
                 </span>
               </label>

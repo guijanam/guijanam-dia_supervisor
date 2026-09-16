@@ -24,7 +24,7 @@ import { STAFF_EDIT_URL } from "@/components/staff-list-link";
 import { AnnouncementAdminContent } from "@/components/announcement-admin";
 import { DocumentAdminContent } from "@/components/document-admin";
 import { JigeunCapSettings } from "@/components/jigeun-cap-settings";
-import { AutoLotteryRunner } from "@/components/auto-lottery-runner";
+import { AutoLotteryStatus } from "@/components/auto-lottery-status";
 import { RequestsPanel } from "@/components/admin-panels/requests-panel";
 import { PinResetPanel } from "@/components/admin-panels/pin-reset-panel";
 import { LotteryLosersPanel } from "@/components/admin-panels/lottery-losers-panel";
@@ -87,7 +87,7 @@ function SidebarItem({
 }
 
 export function AdminDashboard() {
-  const { employee, logout } = useAuth();
+  const { logout } = useAuth();
   const [page, setPage] = useState<AdminPage>("requests");
 
   // 헤더 freezeDate 배지 + JigeunCapSettings 가 쓰는 설정값 (RequestsPanel 이 통지)
@@ -188,20 +188,14 @@ export function AdminDashboard() {
         </div>
       </header>
 
-      {/* 마감 후 자동 추첨 — 조건이 맞을 때만 실행되고 배너를 띄운다.
-          설정 로딩(RequestsPanel)이 끝나야 판정할 수 있으므로 헤더 아래에 둔다. */}
-      {employee && (
-        <AutoLotteryRunner
-          enabled={autoLotteryEnabled}
-          freezeDate={freezeDate}
-          doneFor={autoLotteryDoneFor}
-          targetYear={extraYear}
-          targetQuarter={extraQuarter}
-          extraDeadline={extraDeadline}
-          adminStaffId={employee.staff_id}
-          onFinished={() => requestsRefreshRef.current()}
-        />
-      )}
+      {/* 추첨은 DB 예약 작업이 실행한다. 대시보드는 완료 기록만 표시한다. */}
+      <AutoLotteryStatus
+        enabled={autoLotteryEnabled}
+        freezeDate={freezeDate}
+        doneFor={autoLotteryDoneFor}
+        targetYear={extraYear}
+        targetQuarter={extraQuarter}
+      />
 
       <div className="flex flex-1 min-h-0">
         <aside className="w-12 sm:w-48 shrink-0 border-r p-2 flex flex-col gap-1 overflow-y-auto">
