@@ -382,16 +382,16 @@ export function LotteryLosersPanel() {
 
   return (
     <div className="flex flex-1 flex-col min-w-0 overflow-auto">
-      <div className="p-4 pb-0">
-        <h2 className="text-base font-bold">추첨 탈락자</h2>
+      <div className="border-b px-4 py-4 sm:px-6">
         <p className="text-sm text-muted-foreground">
           추첨에서 탈락한 직원 목록입니다. 이 직원들만 추가 신청 기간에 다시
           신청할 수 있으므로, 아래 연락처로 안내하세요.
         </p>
       </div>
 
-      <div className="flex items-center gap-2 p-3 flex-wrap">
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-4 sm:px-6">
         <select
+          aria-label="조회 연도"
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
           className="h-9 rounded-md border bg-background px-2 text-sm"
@@ -405,6 +405,7 @@ export function LotteryLosersPanel() {
           )}
         </select>
         <select
+          aria-label="조회 분기"
           value={quarter}
           onChange={(e) => setQuarter(Number(e.target.value))}
           className="h-9 rounded-md border bg-background px-2 text-sm"
@@ -416,18 +417,20 @@ export function LotteryLosersPanel() {
           ))}
         </select>
         <Input
+          aria-label="직원 이름 또는 사번 검색"
           type="text"
           placeholder="이름/사번 검색"
           value={nameFilter}
           onChange={(e) => setNameFilter(e.target.value)}
           className="w-40"
         />
-        <div className="flex items-center rounded-md border p-0.5">
+        <div className="flex items-center rounded-md border p-0.5" role="group" aria-label="직책 필터">
           {POSITIONS.map((p) => (
             <button
               key={p}
               type="button"
               onClick={() => setPositionFilter(p)}
+              aria-pressed={positionFilter === p}
               className={cn(
                 "rounded px-3 py-1 text-sm font-medium transition-colors",
                 positionFilter === p
@@ -474,7 +477,7 @@ export function LotteryLosersPanel() {
         </Button>
       </div>
 
-      <div className="px-3 pb-2 text-sm text-muted-foreground">
+      <div className="mx-4 my-4 rounded-md border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground sm:mx-6">
         <Users className="inline h-4 w-4 mr-1 -mt-0.5" />
         탈락 직원{" "}
         <span className="font-semibold text-foreground">
@@ -505,8 +508,8 @@ export function LotteryLosersPanel() {
         </p>
       )}
 
-      <div className="flex-1 px-3 pb-6">
-        <div className="border rounded-md divide-y">
+      <div className="flex-1 px-4 pb-6 sm:px-6">
+        <div className="divide-y overflow-hidden rounded-md border">
           {isLoading && (
             <p className="text-muted-foreground text-sm text-center py-8">
               불러오는 중...
@@ -525,7 +528,7 @@ export function LotteryLosersPanel() {
               return (
                 <div
                   key={row.staff_id}
-                  className="flex items-center justify-between gap-3 px-3 py-2 flex-wrap"
+                  className="flex min-h-16 flex-wrap items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-secondary/50"
                 >
                   <div className="min-w-0 flex flex-col gap-1">
                     <span className="text-sm">

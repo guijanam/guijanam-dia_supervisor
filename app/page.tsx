@@ -30,7 +30,7 @@ export default function Home() {
   // 관리자: 대시보드 / 본인 캘린더 전환
   return (
     <div className="flex flex-col min-h-dvh">
-      <div className="flex-1 pb-14">
+      <div className="flex-1 pb-18">
         {adminView === "dashboard" ? (
           <AdminDashboard />
         ) : adminView === "quarter" ? (
@@ -39,7 +39,7 @@ export default function Home() {
           <AdminCalendar />
         )}
       </div>
-      <nav className="fixed bottom-0 left-0 w-full z-50 flex border-t bg-background">
+      <nav aria-label="관리자 화면" className="fixed bottom-0 left-0 z-50 flex w-full border-t bg-background/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(13,37,61,0.05)] backdrop-blur">
         {(
           [
             { label: "통합 관리", value: "dashboard" },
@@ -49,11 +49,13 @@ export default function Home() {
         ).map((tab) => (
           <button
             key={tab.value}
+            type="button"
+            aria-current={adminView === tab.value ? "page" : undefined}
             className={cn(
-              "flex-1 py-3 font-bold text-sm transition-colors",
+              "min-h-14 flex-1 border-t-2 px-1 py-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:text-sm",
               adminView === tab.value
-                ? "border-b-2 border-primary bg-accent"
-                : "text-muted-foreground"
+                ? "border-primary bg-primary/5 text-primary"
+                : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
             )}
             onClick={() => setAdminView(tab.value)}
           >

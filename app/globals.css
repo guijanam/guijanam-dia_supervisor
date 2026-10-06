@@ -142,3 +142,33 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Data-heavy admin panels share a compact, legible workspace treatment. */
+.admin-workspace [data-slot="table-header"] {
+  background: var(--secondary);
+}
+
+.admin-workspace [data-slot="table-head"] {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.admin-workspace [data-slot="table-body"] [data-slot="table-row"]:nth-child(even) {
+  background: color-mix(in oklch, var(--secondary) 42%, var(--background));
+}
+
+.admin-workspace [data-slot="table-body"] [data-slot="table-row"]:hover {
+  background: var(--accent);
+}
+
+.admin-workspace [data-slot="table-cell"] {
+  height: 48px;
+}
+
+.admin-workspace :where(input, select, textarea):focus-visible,
+.admin-workspace :where(button, a):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

@@ -429,9 +429,8 @@ export function WorkPatternPanel() {
   };
 
   return (
-    <div className="flex flex-1 flex-col min-w-0 gap-3 p-4 overflow-auto">
-      <div>
-        <h2 className="text-base font-bold">교번 관리</h2>
+    <div className="flex flex-1 flex-col min-w-0 gap-5 p-4 overflow-auto sm:p-6">
+      <div className="border-b pb-4">
         <p className="text-sm text-muted-foreground">
           {officePrefix ? `${officePrefix} ` : ""}기관사·차장의 근무순서(교번)를
           관리합니다. 근무순서는{" "}
@@ -520,7 +519,7 @@ export function WorkPatternPanel() {
       </div>
 
       {/* 교번 목록 */}
-      <div className="border rounded-md divide-y max-w-2xl">
+      <div className="max-w-3xl divide-y overflow-hidden rounded-md border">
         {listLoading && (
           <p className="text-muted-foreground text-sm text-center py-6">
             교번 목록 로딩 중...
@@ -538,7 +537,7 @@ export function WorkPatternPanel() {
               key={p.id}
               onClick={() => selectPattern(p.id)}
               className={cn(
-                "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm",
+                "flex min-h-14 w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 selectedId === p.id ? "bg-accent" : "hover:bg-accent/50"
               )}
             >
@@ -559,7 +558,7 @@ export function WorkPatternPanel() {
 
       {/* 선택한 교번 상세 */}
       {selected && (
-        <div className="flex flex-col gap-3 border rounded-md p-3">
+        <div className="flex flex-col gap-4 rounded-md border bg-secondary/25 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-bold">{selected.pattern_name}</h3>

@@ -80,9 +80,8 @@ export function PinResetPanel() {
   });
 
   return (
-    <div className="flex flex-1 flex-col min-w-0 gap-3 p-4 overflow-auto">
-      <div>
-        <h2 className="text-base font-bold">PIN 초기화</h2>
+    <div className="flex flex-1 flex-col min-w-0 gap-5 p-4 overflow-auto sm:p-6">
+      <div className="border-b pb-4">
         <p className="text-sm text-muted-foreground">
           PIN 을 잊은 직원을 검색해 초기화합니다. 초기화된 직원은 다음 로그인
           시 PIN 을 새로 설정합니다.
@@ -98,15 +97,20 @@ export function PinResetPanel() {
         </p>
       )}
 
+      <div className="flex flex-wrap items-end justify-between gap-3 max-w-3xl">
+      <label className="flex w-full max-w-sm flex-col gap-1.5 text-xs font-medium text-muted-foreground">직원 검색
       <Input
         type="text"
         placeholder="이름 검색"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        className="h-9 max-w-sm"
+        className="h-9 text-foreground"
       />
+      </label>
+      <p className="text-sm text-muted-foreground">검색 결과 <strong className="text-foreground tabular-nums">{list.length}</strong>명</p>
+      </div>
 
-      <div className="border rounded-md divide-y max-w-2xl">
+      <div className="max-w-3xl divide-y overflow-hidden rounded-md border">
         {empLoading && (
           <p className="text-muted-foreground text-sm text-center py-6">
             직원 목록 로딩 중...
@@ -121,7 +125,7 @@ export function PinResetPanel() {
           list.map((emp) => (
             <div
               key={emp.staff_id}
-              className="flex items-center justify-between gap-2 px-3 py-2"
+              className="flex min-h-14 items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-secondary/60"
             >
               <span className="text-sm">
                 {emp.staff_name}

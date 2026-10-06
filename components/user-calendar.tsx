@@ -476,9 +476,10 @@ export function UserCalendar() {
   if (!employee) return null;
 
   return (
-    <div className="flex flex-col min-h-dvh">
-      <header className="flex items-center justify-between p-3 border-b">
-        <div className="text-sm">
+    <div className="flex flex-col min-h-dvh bg-secondary/40">
+      <header className="flex items-center justify-between gap-2 border-b bg-background px-4 py-3 md:px-6">
+        <div className="border-l-[3px] border-primary pl-3 text-sm">
+          <span className="block text-[11px] font-semibold tracking-wide text-muted-foreground">내 근무 일정</span>
           <span className="font-bold">{employee.staff_name}</span>
           <span className="text-muted-foreground">
             {" "}
@@ -488,13 +489,13 @@ export function UserCalendar() {
         <div className="flex items-center gap-2">
           <ReferenceEditor />
           <ThemeToggle />
-          <Button variant="ghost" size="icon-sm" onClick={logout} title="로그아웃">
+          <Button variant="ghost" size="icon-sm" onClick={logout} title="로그아웃" aria-label="로그아웃">
             <LogOut className="h-4 w-4" />
           </Button>
         </div>
       </header>
 
-      <div className="flex-1 pb-14">
+      <div className="mx-auto w-full max-w-5xl flex-1 bg-background pb-18 md:my-5 md:rounded-lg md:border">
         {view === "notice" && <DocumentBoard category="document" />}
         {view === "training" && <DocumentBoard category="training" />}
 
@@ -683,7 +684,7 @@ export function UserCalendar() {
         )}
       </div>
 
-      <nav className="fixed bottom-0 left-0 w-full z-50 flex border-t bg-background">
+      <nav aria-label="직원 화면" className="fixed bottom-0 left-0 z-50 flex w-full border-t bg-background/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(13,37,61,0.05)] backdrop-blur">
         {(
           [
             { label: "근무 달력", value: "calendar" },
@@ -693,11 +694,13 @@ export function UserCalendar() {
         ).map((tab) => (
           <button
             key={tab.value}
+            type="button"
+            aria-current={view === tab.value ? "page" : undefined}
             className={cn(
-              "flex-1 py-3 font-bold text-sm transition-colors",
+              "min-h-14 flex-1 border-t-2 px-1 py-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:text-sm",
               view === tab.value
-                ? "border-b-2 border-primary bg-accent"
-                : "text-muted-foreground"
+                ? "border-primary bg-primary/5 text-primary"
+                : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
             )}
             onClick={() => setView(tab.value)}
           >

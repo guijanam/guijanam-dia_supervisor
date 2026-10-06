@@ -145,9 +145,8 @@ export function ReferenceEditPanel() {
     });
 
   return (
-    <div className="flex flex-1 flex-col min-w-0 gap-3 p-4 overflow-auto">
-      <div>
-        <h2 className="text-base font-bold">기준 근무 수정</h2>
+    <div className="flex flex-1 flex-col min-w-0 gap-5 p-4 overflow-auto sm:p-6">
+      <div className="border-b pb-4">
         <p className="text-sm text-muted-foreground">
           직원의 기준일/기준 근무번호를 수정합니다. 이 값은 근무표 계산의
           기준점이라, 바꾸면 해당 직원의 근무표 전체가 다시 계산됩니다.
@@ -160,7 +159,7 @@ export function ReferenceEditPanel() {
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 max-w-2xl">
+      <div className="flex flex-wrap items-center gap-2 max-w-3xl">
         <Input
           type="text"
           placeholder="이름 검색"
@@ -196,7 +195,7 @@ export function ReferenceEditPanel() {
         </Button>
       </div>
 
-      <div className="border rounded-md divide-y max-w-2xl">
+      <div className="max-w-3xl divide-y overflow-hidden rounded-md border">
         {listLoading && (
           <p className="text-muted-foreground text-sm text-center py-6">
             직원 목록 로딩 중...
@@ -214,7 +213,7 @@ export function ReferenceEditPanel() {
               key={emp.staff_id}
               onClick={() => selectEmployee(emp.staff_id)}
               className={cn(
-                "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm",
+                "flex min-h-14 w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 selectedId === emp.staff_id
                   ? "bg-accent"
                   : "hover:bg-accent/50"

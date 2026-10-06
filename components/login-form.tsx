@@ -8,7 +8,7 @@ import type { Employee } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft, ArrowRight, CalendarDays, ShieldCheck } from "lucide-react";
 
 // 이름+사번 확인 후, PIN 미등록이면 "register", 등록돼 있으면 "verify".
 type Step = "credentials" | "register" | "verify";
@@ -135,42 +135,43 @@ export function LoginForm() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-dvh px-6">
-      <div className="w-full max-w-xs space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold">지근/지휴 관리시스템</h1>
+    <main className="min-h-dvh bg-secondary/70">
+      <div className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-5 sm:px-8">
+        <header className="flex items-center justify-between border-b border-border py-5">
+          <div className="flex items-center gap-3">
+            <span className="flex size-9 items-center justify-center rounded-md bg-primary text-primary-foreground" aria-hidden="true"><CalendarDays className="size-5" /></span>
+            <span className="text-sm font-bold tracking-tight">지근 · 지휴 관리</span>
+          </div>
           <ThemeToggle />
-        </div>
+        </header>
+        <div className="grid flex-1 items-center gap-7 py-8 md:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] md:gap-20 md:py-20">
+          <section className="max-w-xl">
+            <p className="mb-3 text-xs font-bold tracking-[0.16em] text-primary md:mb-5">WORK SCHEDULE / ACCESS</p>
+            <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-5xl">근무 일정과 신청 현황을<br />한곳에서 확인하세요.</h1>
+            <p className="mt-4 max-w-md text-sm leading-6 text-muted-foreground md:mt-6 md:text-base md:leading-7">내 근무 달력을 확인하고 지근·지휴를 신청할 수 있습니다. 관리자라면 신청 현황과 마감 설정을 한 화면에서 관리하세요.</p>
+            <div className="mt-5 flex items-start gap-3 border-t pt-4 text-xs text-muted-foreground md:mt-10 md:pt-5 md:text-sm">
+              <ShieldCheck className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
+              <p>최종 지근·지휴 확정은 담당부장(관리자)이 진행합니다.</p>
+            </div>
+          </section>
+          <section className="w-full rounded-xl border border-border bg-card p-5 shadow-sm sm:p-8" aria-labelledby="login-heading">
+            <p className="text-xs font-semibold text-primary">계정 확인</p>
+            <h2 id="login-heading" className="mt-2 text-2xl font-bold">{step === "credentials" ? "로그인" : step === "register" ? "PIN 등록" : "PIN 확인"}</h2>
+            <p className="mb-7 mt-2 text-sm text-muted-foreground">{step === "credentials" ? "등록된 이름과 사번을 입력해 주세요." : "본인 확인을 마치고 계속 진행하세요."}</p>
 
         {step === "credentials" && (
-          <form onSubmit={handleCredentials} className="space-y-3">
-            <p className="text-sm font-medium text-center">
-              최종 지근/지휴 확정은 담당부장(관리자) 입니다.
-            </p>
-            <Input
-              type="text"
-              placeholder="이름"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoComplete="name"
-            />
-            <Input
-              type="text"
-              inputMode="numeric"
-              placeholder="사번"
-              value={empNumber}
-              onChange={(e) => setEmpNumber(e.target.value)}
-              autoComplete="off"
-            />
-            {error && (
-              <p className="text-destructive text-sm font-medium">{error}</p>
-            )}
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "다음"
-              )}
+          <form onSubmit={handleCredentials} className="space-y-5">
+            <div className="space-y-2">
+              <label htmlFor="login-name" className="text-sm font-medium">이름</label>
+              <Input id="login-name" type="text" placeholder="이름을 입력하세요" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="login-number" className="text-sm font-medium">사번</label>
+              <Input id="login-number" type="text" inputMode="numeric" placeholder="사번을 입력하세요" value={empNumber} onChange={(e) => setEmpNumber(e.target.value)} autoComplete="off" required />
+            </div>
+            {error && <p role="alert" className="text-destructive text-sm font-medium">{error}</p>}
+            <Button type="submit" className="h-11 w-full justify-between rounded-md" disabled={isLoading}>
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <>다음 <ArrowRight className="size-4" /></>}
             </Button>
           </form>
         )}
@@ -186,6 +187,7 @@ export function LoginForm() {
               PIN 으로 로그인합니다.
             </p>
             <Input
+              aria-label="새 PIN"
               type="password"
               inputMode="numeric"
               placeholder="PIN 입력 (숫자 4~6자리)"
@@ -195,6 +197,7 @@ export function LoginForm() {
               maxLength={6}
             />
             <Input
+              aria-label="새 PIN 확인"
               type="password"
               inputMode="numeric"
               placeholder="PIN 다시 입력"
@@ -233,6 +236,7 @@ export function LoginForm() {
               PIN 을 입력해주세요.
             </p>
             <Input
+              aria-label="PIN"
               type="password"
               inputMode="numeric"
               placeholder="PIN (숫자 4~6자리)"
@@ -268,7 +272,10 @@ export function LoginForm() {
           </form>
         )}
 
+          </section>
+        </div>
+        <footer className="border-t py-5 text-xs text-muted-foreground">근무 순서 관리 시스템</footer>
       </div>
-    </div>
+    </main>
   );
 }

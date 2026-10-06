@@ -829,17 +829,39 @@ export function RequestsPanel({
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
-      <div className="flex items-center gap-2 p-3 flex-wrap">
-        <div className="flex items-center gap-1">
+      <div className="border-b bg-secondary/35 px-4 py-5 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold tracking-wide text-primary">MONTHLY REQUESTS</p>
+            <h2 className="mt-1 text-xl font-bold">신청현황</h2>
+            <p className="mt-1 text-sm text-muted-foreground">월별 신청을 조회하고, 개별 변경 또는 엑셀 내보내기를 진행합니다.</p>
+          </div>
+          <Button size="sm" onClick={openAddModal}>
+            <Plus className="h-4 w-4" /> 신청 등록
+          </Button>
+        </div>
+        <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-4">
+          <div className="bg-background px-4 py-3"><p className="text-xs text-muted-foreground">조회 결과</p><p className="mt-1 text-2xl font-bold tabular-nums">{filtered.length}<span className="ml-1 text-sm font-normal">건</span></p></div>
+          <div className="bg-background px-4 py-3"><p className="text-xs text-muted-foreground">지근</p><p className="mt-1 text-2xl font-bold tabular-nums text-sky-700 dark:text-sky-300">{filtered.filter((row) => row.record_type === "지근").length}<span className="ml-1 text-sm font-normal text-foreground">건</span></p></div>
+          <div className="bg-background px-4 py-3"><p className="text-xs text-muted-foreground">지휴</p><p className="mt-1 text-2xl font-bold tabular-nums text-red-700 dark:text-red-300">{filtered.filter((row) => row.record_type === "지휴").length}<span className="ml-1 text-sm font-normal text-foreground">건</span></p></div>
+          <div className="bg-background px-4 py-3"><p className="text-xs text-muted-foreground">신청 직원</p><p className="mt-1 text-2xl font-bold tabular-nums">{new Set(filtered.map((row) => row.staff_id)).size}<span className="ml-1 text-sm font-normal">명</span></p></div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-end gap-3 border-b px-4 py-4 sm:px-6">
+        <div className="space-y-1">
+          <label htmlFor="requests-month" className="block text-xs font-medium text-muted-foreground">조회 월</label>
+          <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={() => shiftMonth(-1)}
             title="이전 달"
+            aria-label="이전 달"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Input
+            id="requests-month"
             type="month"
             value={monthValue}
             onChange={(e) => setMonthValue(e.target.value)}
@@ -850,23 +872,32 @@ export function RequestsPanel({
             size="icon-sm"
             onClick={() => shiftMonth(1)}
             title="다음 달"
+            aria-label="다음 달"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
+          </div>
         </div>
+        <div className="space-y-1">
+          <label htmlFor="requests-search" className="block text-xs font-medium text-muted-foreground">직원 검색</label>
         <Input
+          id="requests-search"
           type="text"
           placeholder="이름/사번 검색"
           value={nameFilter}
           onChange={(e) => setNameFilter(e.target.value)}
-          className="w-40"
+          className="w-44"
         />
-        <div className="flex items-center rounded-md border p-0.5">
+        </div>
+        <div className="space-y-1">
+          <span className="block text-xs font-medium text-muted-foreground">직책</span>
+        <div className="flex h-9 items-center rounded-md border p-0.5" role="group" aria-label="직책 필터">
           {(["전체", "기관사", "차장"] as const).map((p) => (
             <button
               key={p}
               type="button"
               onClick={() => setPositionFilter(p)}
+              aria-pressed={positionFilter === p}
               className={cn(
                 "rounded px-3 py-1 text-sm font-medium transition-colors",
                 positionFilter === p
@@ -878,12 +909,14 @@ export function RequestsPanel({
             </button>
           ))}
         </div>
+        </div>
         <Button size="sm" onClick={fetchData} disabled={isLoading}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "조회"}
         </Button>
-        <Button size="sm" variant="outline" onClick={openAddModal}>
-          <Plus className="h-4 w-4" /> 지근/지휴
-        </Button>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <p className="text-sm font-semibold">신청 내역 <span className="ml-1 text-muted-foreground tabular-nums">{filtered.length}</span></p>
+        <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -902,12 +935,6 @@ export function RequestsPanel({
         >
           <Download className="h-4 w-4" /> Excel 다운로드
         </Button>
-        <span className="text-sm text-muted-foreground ml-auto">
-          총 {filtered.length}건
-        </span>
-      </div>
-
-      <div className="flex justify-end px-3 pb-3 sm:-mt-2">
         <Button
           size="sm"
           variant="destructive"
@@ -916,6 +943,7 @@ export function RequestsPanel({
         >
           <Trash2 className="h-4 w-4" /> 전체 삭제
         </Button>
+        </div>
       </div>
 
       {error && (
@@ -924,8 +952,8 @@ export function RequestsPanel({
         </p>
       )}
 
-      <div className="flex-1 overflow-auto px-2 pb-6">
-        <div className="border rounded-md overflow-auto">
+      <div className="flex-1 overflow-auto px-4 pb-6 sm:px-6">
+        <div className="overflow-auto rounded-md border">
           <Table className="min-w-max">
             <TableHeader>
               <TableRow>
