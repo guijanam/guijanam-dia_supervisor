@@ -57,7 +57,7 @@ import { ReferenceEditor } from "@/components/reference-editor";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
-type UserView = "notice" | "calendar";
+type UserView = "notice" | "training" | "calendar";
 
 export interface DayEntry {
   id: string;
@@ -495,7 +495,8 @@ export function UserCalendar() {
       </header>
 
       <div className="flex-1 pb-14">
-        {view === "notice" && <DocumentBoard />}
+        {view === "notice" && <DocumentBoard category="document" />}
+        {view === "training" && <DocumentBoard category="training" />}
 
         {view === "calendar" && (
           <>
@@ -687,6 +688,7 @@ export function UserCalendar() {
           [
             { label: "근무 달력", value: "calendar" },
             { label: "문서", value: "notice" },
+            { label: "교육", value: "training" },
           ] as { label: string; value: UserView }[]
         ).map((tab) => (
           <button

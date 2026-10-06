@@ -361,8 +361,19 @@ export interface Announcement {
   updated_at: string;
 }
 
+// 문서 구분: 같은 documents 테이블을 '문서' 메뉴와 '교육훈련' 메뉴가 나눠 쓴다.
+export type DocumentCategory = "document" | "training";
+
+export const TRAINING_TYPES = ["정기", "수시", "특별"] as const;
+export type TrainingType = (typeof TRAINING_TYPES)[number];
+
+// 관리자가 미확인자에게 지정하는 사유.
+export const EXEMPTION_REASONS = ["휴가", "병가", "휴직", "기타"] as const;
+export type ExemptionReason = (typeof EXEMPTION_REASONS)[number];
+
 // 문서: 관리자가 업로드, 직원이 열람 후 확인(서명).
 // file_url/file_name 은 Supabase Storage 'documents' 버킷 첨부(없으면 null).
+// training_* / target_position 은 category='training' 에서만 쓴다.
 export interface Document {
   id: string;
   title: string;
@@ -374,14 +385,36 @@ export interface Document {
   created_by: number;
   created_at: string;
   updated_at: string;
+  category: DocumentCategory;
+  training_start: string | null;
+  training_end: string | null;
+  training_type: string | null;
+  // null 이면 전 직원 대상
+  target_position: string | null;
 }
 
 // 문서 열람 확인 기록: 직원 본인의 staff_id 로만 생성(대리확인 불가).
+// training_date/training_shift: 교육을 받은 날과 그날 근무(교육훈련만).
 export interface DocumentRead {
   id: string;
   document_id: string;
   staff_id: number;
   confirmed_at: string;
+  training_date: string | null;
+  training_shift: string | null;
+  // 직원이 마감일 전에 교육받은 날·근무를 고친 마지막 시각
+  training_updated_at: string | null;
+}
+
+// 미확인 사유: 관리자가 지정. 본인이 확인하면 확인이 우선한다.
+export interface DocumentReadExemption {
+  id: string;
+  document_id: string;
+  staff_id: number;
+  reason: string;
+  note: string | null;
+  created_by: number | null;
+  created_at: string;
 }
 
 // 관리자 확인자 명단 화면: document_reads 와 coworker_list 를 join 한 결과

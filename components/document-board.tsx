@@ -1,16 +1,26 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
+import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import type {
   Document,
+  DocumentCategory,
   DocumentRead,
   DocumentOption,
   DocumentVote,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { ImageViewer } from "@/components/image-viewer";
 import {
   FileText,
@@ -20,12 +30,14 @@ import {
   ExternalLink,
   Download,
 } from "lucide-react";
-import { cn, isImageFile } from "@/lib/utils";
+import { cn, formatTrainingPeriod, isImageFile } from "@/lib/utils";
 import { format } from "date-fns";
 
 interface DocumentBoardProps {
   // 미확인 문서 수를 부모(헤더 뱃지 등)로 전달
   onUnreadCountChange?: (count: number) => void;
+  // '문서' 탭과 '교육' 탭이 같은 화면을 나눠 쓴다.
+  category?: DocumentCategory;
 }
 
 // 한 번에 불러오는 문서 수 (커서 기반 페이지네이션)
@@ -33,14 +45,54 @@ const PAGE_SIZE = 20;
 
 // 목록 렌더에 필요한 문서 컬럼 (select("*") 대신 명시)
 const DOC_COLUMNS =
-  "id,title,description,file_url,file_name,is_required,expires_at,created_by,created_at,updated_at";
+  "id,title,description,file_url,file_name,is_required,expires_at,created_by,created_at,updated_at,category,training_start,training_end,training_type,target_position";
 
-export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
+// 첨부를 연 문서 id 목록. 첨부가 있는 문서는 열람 후에만 확인할 수 있다.
+// 기기별 편의 기록이라 localStorage 로 충분하다(접근 불가 시 빈 목록).
+function openedKey(staffId: number) {
+  return `opened_docs_${staffId}`;
+}
+function loadOpened(staffId: number): Set<string> {
+  try {
+    const raw = localStorage.getItem(openedKey(staffId));
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveOpened(staffId: number, ids: Set<string>) {
+  try {
+    localStorage.setItem(openedKey(staffId), JSON.stringify([...ids]));
+  } catch {
+    // 저장 실패 시 이번 화면에서만 유지
+  }
+}
+
+// 교육받은 날 기본값: 오늘을 교육기간 안으로 맞춘다.
+function defaultTrainingDate(d: Document): string {
+  const today = format(new Date(), "yyyy-MM-dd");
+  const start = d.training_start ?? today;
+  const end = d.training_end ?? start;
+  if (today < start) return start;
+  if (today > end) return end;
+  return today;
+}
+
+export function DocumentBoard({
+  onUnreadCountChange,
+  category = "document",
+}: DocumentBoardProps) {
   const { employee } = useAuth();
+  const isTraining = category === "training";
+  const boardTitle = isTraining ? "교육훈련" : "문서함";
 
   const [docs, setDocs] = useState<Document[]>([]);
   // 본인이 확인한 document_id 집합
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  // document_id → 본인이 기록한 교육받은 날·근무 (교육만)
+  const [myTraining, setMyTraining] = useState<
+    Map<string, Pick<DocumentRead, "training_date" | "training_shift">>
+  >(new Map());
   // document_id → 선택지 목록 (선택지 있으면 투표 문서)
   const [optionsByDoc, setOptionsByDoc] = useState<
     Map<string, DocumentOption[]>
@@ -61,6 +113,55 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  // 첨부를 연 document_id 집합
+  const [openedIds, setOpenedIds] = useState<Set<string>>(new Set());
+  // 교육 확인 다이얼로그: 교육받은 날 + 그날 근무
+  const [trainingDoc, setTrainingDoc] = useState<Document | null>(null);
+  const [trainingDate, setTrainingDate] = useState("");
+  const [trainingShift, setTrainingShift] = useState("");
+  const [shiftLoading, setShiftLoading] = useState(false);
+  // true 면 확인 후 수정 — insert 대신 update 한다.
+  const [isEditingTraining, setIsEditingTraining] = useState(false);
+  // 수정 다이얼로그를 열 때는 저장된 근무를 근무표 값으로 덮어쓰지 않는다.
+  const skipShiftAutofill = useRef(false);
+
+  useEffect(() => {
+    if (employee) setOpenedIds(loadOpened(employee.staff_id));
+  }, [employee]);
+
+  const markOpened = (docId: string) => {
+    if (!employee || openedIds.has(docId)) return;
+    const next = new Set(openedIds).add(docId);
+    setOpenedIds(next);
+    saveOpened(employee.staff_id, next);
+  };
+
+  // 교육받은 날을 고르면 근무표의 그날 근무를 기본값으로 채운다.
+  // 근무 교대·지근 등으로 실제와 다를 수 있어 직원이 고칠 수 있다.
+  useEffect(() => {
+    if (!trainingDoc || !trainingDate || !employee) return;
+    if (skipShiftAutofill.current) {
+      skipShiftAutofill.current = false;
+      return;
+    }
+    let active = true;
+    setShiftLoading(true);
+    fetchScheduleByRange(trainingDate, trainingDate)
+      .then((rows) => {
+        if (!active) return;
+        const mine = rows.find((r) => r.staff_id === employee.staff_id);
+        setTrainingShift(mine?.turn ?? "");
+      })
+      .catch(() => {
+        if (active) setTrainingShift("");
+      })
+      .finally(() => {
+        if (active) setShiftLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [trainingDoc, trainingDate, employee]);
 
   // 한 페이지(PAGE_SIZE) 만큼 문서 + 해당 문서들의 선택지/투표를 불러온다.
   // reset=true 면 첫 페이지(커서 무시 + 상태 교체), false 면 다음 페이지(append).
@@ -75,8 +176,15 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
         let q = supabase
           .from("documents")
           .select(DOC_COLUMNS)
+          .eq("category", category)
           .order("created_at", { ascending: false })
           .limit(PAGE_SIZE + 1);
+        // 대상 직책이 정해진 교육은 해당 직책에게만 보인다.
+        if (isTraining && employee.staff_position) {
+          q = q.or(
+            `target_position.is.null,target_position.eq.${employee.staff_position.trim()}`
+          );
+        }
         if (!reset && cursor) q = q.lt("created_at", cursor);
         const { data: docData, error: dErr } = await q;
         if (dErr) throw dErr;
@@ -111,12 +219,26 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
         if (reset) {
           const { data: readData, error: rErr } = await supabase
             .from("document_reads")
-            .select("document_id")
+            .select("document_id, training_date, training_shift")
             .eq("staff_id", employee.staff_id);
           if (rErr) throw rErr;
-          readSet = new Set(
-            ((readData as Pick<DocumentRead, "document_id">[]) ?? []).map(
-              (r) => r.document_id
+          const rows =
+            (readData as Pick<
+              DocumentRead,
+              "document_id" | "training_date" | "training_shift"
+            >[]) ?? [];
+          readSet = new Set(rows.map((r) => r.document_id));
+          setMyTraining(
+            new Map(
+              rows
+                .filter((r) => r.training_date)
+                .map((r) => [
+                  r.document_id,
+                  {
+                    training_date: r.training_date,
+                    training_shift: r.training_shift,
+                  },
+                ])
             )
           );
         }
@@ -159,7 +281,7 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
         else setLoadingMore(false);
       }
     },
-    [employee, cursor]
+    [employee, cursor, category, isTraining]
   );
 
   // 최초(또는 직원 변경 시) 첫 페이지 로드
@@ -183,7 +305,10 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
     format(new Date(), "yyyy-MM-dd") > d.expires_at.slice(0, 10);
 
   // 열람 확인 — 본인 staff_id 로만 insert (대리확인 불가)
-  const confirm = async (doc: Document) => {
+  const confirm = async (
+    doc: Document,
+    training?: { date: string; shift: string }
+  ) => {
     if (!employee) return;
     setConfirming(doc.id);
     setError(null);
@@ -191,15 +316,83 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
       const { error: insErr } = await supabase.from("document_reads").insert({
         document_id: doc.id,
         staff_id: employee.staff_id,
+        ...(training
+          ? {
+              training_date: training.date,
+              training_shift: training.shift.trim() || null,
+            }
+          : {}),
       });
       // 유니크 제약 위반(이미 확인)은 정상 처리로 간주
       if (insErr && insErr.code !== "23505") throw insErr;
       setReadIds((prev) => new Set(prev).add(doc.id));
+      if (training) rememberTraining(doc.id, training);
+      setTrainingDoc(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "확인 처리에 실패했습니다.");
     } finally {
       setConfirming(null);
     }
+  };
+
+  const rememberTraining = (
+    docId: string,
+    training: { date: string; shift: string }
+  ) =>
+    setMyTraining((prev) =>
+      new Map(prev).set(docId, {
+        training_date: training.date,
+        training_shift: training.shift.trim() || null,
+      })
+    );
+
+  // 확인 후 마감일까지 교육받은 날·근무만 고친다(확인 시각은 DB 트리거가 고정).
+  const updateTraining = async (
+    doc: Document,
+    training: { date: string; shift: string }
+  ) => {
+    if (!employee) return;
+    setConfirming(doc.id);
+    setError(null);
+    try {
+      const { error: upErr } = await supabase
+        .from("document_reads")
+        .update({
+          training_date: training.date,
+          training_shift: training.shift.trim() || null,
+        })
+        .eq("document_id", doc.id)
+        .eq("staff_id", employee.staff_id);
+      if (upErr) throw upErr;
+      rememberTraining(doc.id, training);
+      setTrainingDoc(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "수정에 실패했습니다.");
+    } finally {
+      setConfirming(null);
+    }
+  };
+
+  // 교육은 교육받은 날과 근무를 받은 뒤 확인한다.
+  const startConfirm = (doc: Document) => {
+    if (doc.category !== "training") {
+      confirm(doc);
+      return;
+    }
+    setIsEditingTraining(false);
+    setTrainingDate(defaultTrainingDate(doc));
+    setTrainingShift("");
+    setTrainingDoc(doc);
+  };
+
+  const startEditTraining = (doc: Document) => {
+    const saved = myTraining.get(doc.id);
+    setIsEditingTraining(true);
+    // 저장된 값이 있으면 그대로 보여 주고, 없으면 새로 채운다.
+    skipShiftAutofill.current = !!saved?.training_date;
+    setTrainingDate(saved?.training_date ?? defaultTrainingDate(doc));
+    setTrainingShift(saved?.training_shift ?? "");
+    setTrainingDoc(doc);
   };
 
   // 투표 — 본인 staff_id 로만. 재투표는 기존 표를 update.
@@ -239,7 +432,7 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
   if (isLoading) {
     return (
       <div className="px-4 pt-3 pb-2 flex flex-col gap-2">
-        <h2 className="text-base font-bold pb-1">문서함</h2>
+        <h2 className="text-base font-bold pb-1">{boardTitle}</h2>
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
       </div>
@@ -249,20 +442,29 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
   if (error) {
     return (
       <div className="px-4 pt-3 pb-2">
-        <h2 className="text-base font-bold pb-1">문서함</h2>
+        <h2 className="text-base font-bold pb-1">{boardTitle}</h2>
         <p className="text-destructive text-sm font-medium">{error}</p>
       </div>
     );
   }
 
-  if (docs.length === 0) return null;
+  if (docs.length === 0) {
+    return isTraining ? (
+      <div className="px-4 pt-3 pb-2">
+        <h2 className="text-base font-bold pb-1">{boardTitle}</h2>
+        <p className="text-sm text-muted-foreground py-6 text-center">
+          등록된 교육이 없습니다.
+        </p>
+      </div>
+    ) : null;
+  }
 
   const unreadCount = docs.filter((d) => !readIds.has(d.id)).length;
 
   return (
     <div className="px-4 pt-3 pb-2 flex flex-col gap-2">
       <h2 className="text-base font-bold pb-1 flex items-center gap-2">
-        문서함
+        {boardTitle}
         {unreadCount > 0 && (
           <span className="text-[11px] font-bold rounded-full bg-red-500 text-white px-2 py-0.5">
             미확인 {unreadCount}
@@ -272,10 +474,14 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
 
       {docs.map((d) => {
         const isRead = readIds.has(d.id);
+        const myRecord = myTraining.get(d.id);
         const expired = isExpired(d);
         const options = optionsByDoc.get(d.id) ?? [];
         const isVoteDoc = options.length > 0;
         const myOption = myVotes.get(d.id);
+        // 첨부가 있으면 연 뒤에만 확인 가능
+        const needsOpen = !!d.file_url && !openedIds.has(d.id);
+        const period = formatTrainingPeriod(d);
         return (
           <div
             key={d.id}
@@ -294,8 +500,19 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
                       투표
                     </span>
                   )}
+                  {d.training_type && (
+                    <span className="shrink-0 text-[10px] font-bold rounded bg-emerald-100 text-emerald-700 px-1.5 py-0.5 dark:bg-emerald-900/50 dark:text-emerald-300">
+                      {d.training_type}
+                    </span>
+                  )}
                   <p className="font-semibold">{d.title}</p>
                 </div>
+                {period && (
+                  <p className="mt-1 text-xs font-medium">
+                    교육 {period}
+                    {d.target_position && ` · ${d.target_position}`}
+                  </p>
+                )}
                 {d.description && (
                   <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
                     {d.description}
@@ -368,12 +585,13 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      markOpened(d.id);
                       setViewer({
                         src: d.file_url!,
                         name: d.file_name ?? "image",
-                      })
-                    }
+                      });
+                    }}
                     title="이미지 크게 보기"
                     className="rounded-md border overflow-hidden transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -386,7 +604,11 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
                     />
                   </button>
                   <Button variant="outline" size="xs" asChild>
-                    <a href={d.file_url} download={d.file_name ?? undefined}>
+                    <a
+                      href={d.file_url}
+                      download={d.file_name ?? undefined}
+                      onClick={() => markOpened(d.id)}
+                    >
                       <Download className="h-3.5 w-3.5 mr-1" />
                       다운로드
                     </a>
@@ -399,6 +621,7 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
                       href={d.file_url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={() => markOpened(d.id)}
                     >
                       <Paperclip className="h-3.5 w-3.5 mr-1" />
                       파일 열기
@@ -409,16 +632,42 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
               )}
 
               {isRead ? (
-                <span className="ml-auto flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400">
-                  <Check className="h-4 w-4" />
-                  확인 완료
-                </span>
+                <div className="ml-auto flex items-center gap-2">
+                  {d.category === "training" && (
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {myRecord?.training_date
+                        ? `교육 ${myRecord.training_date
+                            .slice(5)
+                            .replace("-", ".")}${
+                            myRecord.training_shift
+                              ? ` · ${myRecord.training_shift}`
+                              : ""
+                          }`
+                        : "교육일 미기록"}
+                    </span>
+                  )}
+                  {d.category === "training" && !expired && (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => startEditTraining(d)}
+                      disabled={confirming === d.id}
+                    >
+                      수정
+                    </Button>
+                  )}
+                  <span className="flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400">
+                    <Check className="h-4 w-4" />
+                    확인 완료
+                  </span>
+                </div>
               ) : (
                 <Button
                   size="xs"
                   className="ml-auto"
-                  onClick={() => confirm(d)}
-                  disabled={confirming === d.id || expired}
+                  onClick={() => startConfirm(d)}
+                  disabled={confirming === d.id || expired || needsOpen}
+                  title={needsOpen ? "자료를 먼저 열람하세요" : undefined}
                 >
                   {confirming === d.id ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -431,6 +680,11 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
                 </Button>
               )}
             </div>
+            {!isRead && needsOpen && !expired && (
+              <p className="text-[11px] text-muted-foreground text-right">
+                첨부 자료를 먼저 열람하면 확인할 수 있습니다.
+              </p>
+            )}
           </div>
         );
       })}
@@ -450,6 +704,84 @@ export function DocumentBoard({ onUnreadCountChange }: DocumentBoardProps) {
           )}
         </Button>
       )}
+
+      {/* 교육 확인: 교육받은 날 + 그날 근무 */}
+      <Dialog
+        open={!!trainingDoc}
+        onOpenChange={(o) => !o && setTrainingDoc(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="truncate">{trainingDoc?.title}</DialogTitle>
+            <DialogDescription>
+              {isEditingTraining
+                ? `교육받은 날과 그날 근무를 고칩니다.${
+                    trainingDoc?.expires_at
+                      ? ` ${format(
+                          new Date(trainingDoc.expires_at),
+                          "MM.dd"
+                        )} 마감일까지 수정할 수 있습니다.`
+                      : ""
+                  }`
+                : "교육받은 날과 그날 근무를 확인한 뒤 서명을 완료하세요. 마감일까지는 나중에 고칠 수 있습니다."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              교육받은 날
+            </label>
+            <Input
+              type="date"
+              value={trainingDate}
+              min={trainingDoc?.training_start ?? undefined}
+              max={
+                trainingDoc?.training_end ??
+                trainingDoc?.training_start ??
+                undefined
+              }
+              onChange={(e) => setTrainingDate(e.target.value)}
+              disabled={!!confirming}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              그날 근무 (근무표 기준 자동 입력, 다르면 수정)
+            </label>
+            <Input
+              value={trainingShift}
+              placeholder={shiftLoading ? "근무 불러오는 중…" : "예: 21, 휴"}
+              onChange={(e) => setTrainingShift(e.target.value)}
+              disabled={!!confirming || shiftLoading}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setTrainingDoc(null)}
+              disabled={!!confirming}
+            >
+              취소
+            </Button>
+            <Button
+              onClick={() => {
+                if (!trainingDoc) return;
+                const training = { date: trainingDate, shift: trainingShift };
+                if (isEditingTraining) updateTraining(trainingDoc, training);
+                else confirm(trainingDoc, training);
+              }}
+              disabled={!!confirming || shiftLoading || !trainingDate}
+            >
+              {confirming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : isEditingTraining ? (
+                "수정 저장"
+              ) : (
+                "확인(서명)"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {viewer && (
         <ImageViewer

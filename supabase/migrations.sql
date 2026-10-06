@@ -637,3 +637,133 @@ alter table public.app_settings
 --  새 승무소마다 예약 작업도 별도로 설치해야 한다.
 --  적용·운영 확인: docs/auto-lottery-cron.md
 -- ============================================================
+
+-- ============================================================
+-- 25) 교육훈련 확인 -------------------------------------------
+--  [배경]
+--  교육 자료 확인을 수기 서명으로 받은 뒤 담당자가 엑셀로 다시 옮겨 적었다.
+--  휴가·병가·휴직으로 서명하지 못한 직원은 재직자 명단과 직접 대조해야 해서
+--  누락이 생겼다. 직원이 앱에서 자료를 열람하고 확인 버튼을 누르는 것으로
+--  서명을 대신한다.
+--
+--  - 별도 테이블 대신 documents 에 category 를 두어 섹션 12 의 확인 기록·
+--    미확인자 계산·엑셀 출력을 그대로 재사용한다. 메뉴만 '문서'와 '교육훈련'
+--    으로 나뉜다. 자동 추첨 결과 문서(섹션 24)는 기본값 'document' 로 들어간다.
+--  - training_start / training_end: 교육 기간(하루짜리는 같은 날짜).
+--  - training_type: 교육구분(정기/수시/특별).
+--  - target_position: NULL 이면 전 직원, 아니면 '기관사' 또는 '차장'만 대상.
+--    미확인자 계산도 이 직책 기준이다.
+--  - document_reads.training_date / training_shift: 직원이 교육을 받은 날과
+--    그날 근무. 근무는 근무표 값을 기본으로 채우되 실제 근무(교대·지근 등)가
+--    다를 수 있어 직원이 고칠 수 있다. 확인 기록 불변 원칙(섹션 12)은 유지.
+--  - document_read_exemptions: 관리자가 미확인자에게 지정하는 사유
+--    (휴가/병가/휴직/기타). 사유가 있어도 본인이 확인하면 '확인'이 우선한다.
+--  - 보안 수준은 섹션 12 와 동일(anon-permissive). 한계도 동일하게 적용.
+-- ============================================================
+alter table public.documents
+  add column if not exists category text not null default 'document';
+alter table public.documents
+  add column if not exists training_start date;
+alter table public.documents
+  add column if not exists training_end date;
+alter table public.documents
+  add column if not exists training_type text;
+alter table public.documents
+  add column if not exists target_position text;
+
+alter table public.documents
+  drop constraint if exists documents_category_check;
+alter table public.documents
+  add constraint documents_category_check
+  check (category in ('document', 'training'));
+
+create index if not exists documents_category_created_at_idx
+  on public.documents (category, created_at desc);
+
+alter table public.document_reads
+  add column if not exists training_date date;
+alter table public.document_reads
+  add column if not exists training_shift text;
+
+create table if not exists public.document_read_exemptions (
+  id           uuid primary key default gen_random_uuid(),
+  document_id  uuid not null references public.documents(id) on delete cascade,
+  staff_id     integer not null,
+  reason       text not null,
+  note         text,
+  created_by   integer,
+  created_at   timestamptz not null default now(),
+  constraint document_read_exemptions_unique unique (document_id, staff_id)
+);
+
+create index if not exists document_read_exemptions_document_idx
+  on public.document_read_exemptions (document_id);
+
+alter table public.document_read_exemptions enable row level security;
+drop policy if exists document_read_exemptions_read   on public.document_read_exemptions;
+drop policy if exists document_read_exemptions_insert on public.document_read_exemptions;
+drop policy if exists document_read_exemptions_update on public.document_read_exemptions;
+drop policy if exists document_read_exemptions_delete on public.document_read_exemptions;
+create policy document_read_exemptions_read   on public.document_read_exemptions for select using (true);
+create policy document_read_exemptions_insert on public.document_read_exemptions for insert with check (true);
+create policy document_read_exemptions_update on public.document_read_exemptions for update using (true) with check (true);
+create policy document_read_exemptions_delete on public.document_read_exemptions for delete using (true);
+
+-- ============================================================
+-- 26) 교육받은 날·근무 수정 (마감일까지) -----------------------
+--  직원이 확인 후에도 마감일(documents.expires_at)까지는 교육받은 날과
+--  그날 근무를 고칠 수 있게 한다. 마감일이 없으면 언제든 고칠 수 있다.
+--
+--  - 섹션 12 는 document_reads 에 update 정책을 두지 않아 확인 기록을 불변으로
+--    했다. 여기서 update 정책을 열되, 트리거로 training_date/training_shift
+--    외의 컬럼(document_id, staff_id, confirmed_at)은 이전 값으로 되돌린다.
+--    서명의 본체(누가·언제 확인했는가)는 계속 불변이다.
+--  - 마감일 검사도 트리거에서 한다(화면 검사만으로는 anon 키 직접 호출을
+--    막지 못함). 마감일은 화면과 같은 기준이다: 화면은 expires_at 을
+--    yyyy-MM-dd(UTC 날짜)로 잘라 한국 날짜 오늘과 비교한다.
+--  - training_updated_at: 직원이 마지막으로 고친 시각(관리자 확인용).
+-- ============================================================
+alter table public.document_reads
+  add column if not exists training_updated_at timestamptz;
+
+create or replace function public.document_reads_guard_update()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_expires timestamptz;
+begin
+  -- 서명 본체는 변경 불가
+  new.document_id  := old.document_id;
+  new.staff_id     := old.staff_id;
+  new.confirmed_at := old.confirmed_at;
+
+  select expires_at into v_expires
+    from public.documents
+   where id = old.document_id;
+
+  if v_expires is not null
+     and (now() at time zone 'Asia/Seoul')::date
+         > (v_expires at time zone 'UTC')::date then
+    raise exception '마감일이 지나 수정할 수 없습니다.';
+  end if;
+
+  if new.training_date is distinct from old.training_date
+     or new.training_shift is distinct from old.training_shift then
+    new.training_updated_at := now();
+  else
+    new.training_updated_at := old.training_updated_at;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists document_reads_guard_update on public.document_reads;
+create trigger document_reads_guard_update
+  before update on public.document_reads
+  for each row execute function public.document_reads_guard_update();
+
+drop policy if exists document_reads_update on public.document_reads;
+create policy document_reads_update on public.document_reads
+  for update using (true) with check (true);

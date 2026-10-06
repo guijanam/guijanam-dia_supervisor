@@ -6,12 +6,15 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import type {
   Document,
+  DocumentCategory,
   DocumentRead,
+  DocumentReadExemption,
   DocumentReadWithEmployee,
   DocumentOption,
   DocumentVote,
   Employee,
 } from "@/lib/types";
+import { EXEMPTION_REASONS, TRAINING_TYPES } from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -36,7 +39,7 @@ import {
   X,
   Download,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatTrainingPeriod } from "@/lib/utils";
 import { format } from "date-fns";
 
 const STORAGE_BUCKET = "documents";
@@ -46,7 +49,10 @@ const PAGE_SIZE = 20;
 
 // 목록 렌더에 필요한 문서 컬럼 (select("*") 대신 명시)
 const DOC_COLUMNS =
-  "id,title,description,file_url,file_name,is_required,expires_at,created_by,created_at,updated_at";
+  "id,title,description,file_url,file_name,is_required,expires_at,created_by,created_at,updated_at,category,training_start,training_end,training_type,target_position";
+
+// 교육훈련 대상 직책 선택지 ("" = 전체)
+const TARGET_POSITIONS = ["기관사", "차장"] as const;
 
 // getPublicUrl 이 만든 공개 URL(.../object/public/documents/<경로>)에서
 // Storage 내부 경로만 추출한다. 추출 실패 시 null → 삭제를 건너뛴다.
@@ -61,11 +67,18 @@ function storagePathFromUrl(url: string | null): string | null {
 interface ContentProps {
   // 다이얼로그 안에서 렌더될 때 true — 목록 높이를 제한한다.
   inDialog?: boolean;
+  // '문서' 메뉴와 '교육훈련' 메뉴가 같은 화면을 나눠 쓴다.
+  category?: DocumentCategory;
 }
 
 // 문서 관리 본문 — 다이얼로그(DocumentAdmin)와 페이지 패널에서 공용으로 쓴다.
-export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
+export function DocumentAdminContent({
+  inDialog,
+  category = "document",
+}: ContentProps = {}) {
   const { employee, isAdmin } = useAuth();
+  const isTraining = category === "training";
+  const noun = isTraining ? "교육" : "문서";
 
   const [items, setItems] = useState<Document[]>([]);
   // document_id → 선택지 수 (투표 문서 여부 판별)
@@ -89,6 +102,11 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
   const [file, setFile] = useState<File | null>(null);
   // 투표 선택지 텍스트 목록 (빈 문자열 항목은 저장 시 제거)
   const [options, setOptions] = useState<string[]>([]);
+  // 교육훈련 전용 (yyyy-MM-dd, "" = 미지정)
+  const [trainingStart, setTrainingStart] = useState("");
+  const [trainingEnd, setTrainingEnd] = useState("");
+  const [trainingType, setTrainingType] = useState<string>(TRAINING_TYPES[0]);
+  const [targetPosition, setTargetPosition] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   // 확인자 명단 / 투표 집계
@@ -107,6 +125,7 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
         let q = supabase
           .from("documents")
           .select(DOC_COLUMNS)
+          .eq("category", category)
           .order("created_at", { ascending: false })
           .limit(PAGE_SIZE + 1);
         if (!reset && cursor) q = q.lt("created_at", cursor);
@@ -143,14 +162,14 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
         setCursor(pageDocs.at(-1)?.created_at ?? cursor);
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "문서를 불러오지 못했습니다."
+          err instanceof Error ? err.message : `${noun}를 불러오지 못했습니다.`
         );
       } finally {
         if (reset) setIsLoading(false);
         else setLoadingMore(false);
       }
     },
-    [cursor]
+    [cursor, category, noun]
   );
 
   useEffect(() => {
@@ -169,6 +188,10 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
     setExpiresAt("");
     setFile(null);
     setOptions([]);
+    setTrainingStart("");
+    setTrainingEnd("");
+    setTrainingType(TRAINING_TYPES[0]);
+    setTargetPosition("");
     setError(null);
     setIsFormOpen(true);
   };
@@ -180,6 +203,10 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
     setIsRequired(d.is_required);
     setExpiresAt(d.expires_at ? d.expires_at.slice(0, 10) : "");
     setFile(null);
+    setTrainingStart(d.training_start ?? "");
+    setTrainingEnd(d.training_end ?? "");
+    setTrainingType(d.training_type ?? TRAINING_TYPES[0]);
+    setTargetPosition(d.target_position ?? "");
     setError(null);
     // 기존 선택지 로드
     try {
@@ -208,6 +235,16 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
   const save = async () => {
     const t = title.trim();
     if (!t) return;
+    if (isTraining) {
+      if (!trainingStart) {
+        setError("교육 시작일을 입력하세요.");
+        return;
+      }
+      if (trainingEnd && trainingEnd < trainingStart) {
+        setError("교육 종료일이 시작일보다 빠릅니다.");
+        return;
+      }
+    }
     setIsSaving(true);
     setError(null);
     try {
@@ -235,6 +272,11 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
         file_name: fileName,
         is_required: isRequired,
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+        category,
+        training_start: isTraining ? trainingStart : null,
+        training_end: isTraining ? trainingEnd || trainingStart : null,
+        training_type: isTraining ? trainingType : null,
+        target_position: isTraining ? targetPosition || null : null,
       };
 
       // 저장할 문서 id 확보
@@ -267,9 +309,10 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
       // 투표 선택지 동기화 — 빈 항목 제거 후 전체 교체.
       // (수정 시 기존 선택지를 지우고 다시 넣는다. 기존 투표는 cascade 로
       //  삭제되므로, 이미 투표가 진행된 문서의 선택지 변경은 신중해야 함.)
-      const cleanOptions = options
-        .map((o) => o.trim())
-        .filter((o) => o.length > 0);
+      // 교육훈련은 투표를 쓰지 않는다.
+      const cleanOptions = isTraining
+        ? []
+        : options.map((o) => o.trim()).filter((o) => o.length > 0);
       if (editing) {
         const { error: delErr } = await supabase
           .from("document_options")
@@ -302,7 +345,7 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
   const remove = async (d: Document) => {
     if (
       !window.confirm(
-        "이 문서를 삭제할까요? 확인 기록·투표 결과도 함께 삭제됩니다."
+        `이 ${noun}를 삭제할까요? 확인 기록·투표 결과도 함께 삭제됩니다.`
       )
     ) {
       return;
@@ -342,7 +385,7 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
         onClick={openCreate}
         className={inDialog ? "w-full" : "w-full max-w-sm"}
       >
-        <Plus className="h-4 w-4 mr-1" />새 문서
+        <Plus className="h-4 w-4 mr-1" />새 {noun}
       </Button>
 
       <div
@@ -359,11 +402,12 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
               </>
             ) : items.length === 0 ? (
               <p className="text-sm text-muted-foreground py-6 text-center">
-                등록된 문서가 없습니다.
+                등록된 {noun}가 없습니다.
               </p>
             ) : (
               items.map((d) => {
                 const isVote = (optionCounts.get(d.id) ?? 0) > 0;
+                const period = formatTrainingPeriod(d);
                 return (
                   <div
                     key={d.id}
@@ -381,8 +425,18 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
                             투표
                           </span>
                         )}
+                        {d.training_type && (
+                          <span className="shrink-0 text-[10px] font-bold rounded bg-emerald-100 text-emerald-700 px-1.5 py-0.5 dark:bg-emerald-900/50 dark:text-emerald-300">
+                            {d.training_type}
+                          </span>
+                        )}
                         <p className="font-semibold truncate">{d.title}</p>
                       </div>
+                      {period && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          교육 {period} · {d.target_position ?? "전체"}
+                        </p>
+                      )}
                       {d.file_name && (
                         <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground truncate">
                           <Paperclip className="h-3 w-3 shrink-0" />
@@ -465,10 +519,13 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing ? "문서 수정" : "새 문서"}</DialogTitle>
+            <DialogTitle>
+              {editing ? `${noun} 수정` : `새 ${noun}`}
+            </DialogTitle>
             <DialogDescription>
-              제목·설명·파일·투표 선택지를 설정하세요. 선택지를 추가하면 투표
-              문서가 됩니다.
+              {isTraining
+                ? "교육 자료와 교육기간·대상을 설정하세요. 첨부가 있으면 직원이 자료를 연 뒤에만 확인할 수 있습니다."
+                : "제목·설명·파일·투표 선택지를 설정하세요. 선택지를 추가하면 투표 문서가 됩니다."}
             </DialogDescription>
           </DialogHeader>
 
@@ -508,60 +565,130 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
               )}
             </div>
 
-            {/* 투표 선택지 */}
-            <div className="flex flex-col gap-2 rounded-md border p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">
-                  투표 선택지 (선택)
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={addOption}
-                  disabled={isSaving}
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  항목 추가
-                </Button>
-              </div>
-              {options.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  선택지를 추가하면 직원이 투표할 수 있습니다. 비워두면 일반
-                  확인 문서입니다.
-                </p>
-              ) : (
-                options.map((opt, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
+            {/* 교육훈련 전용 */}
+            {isTraining && (
+              <div className="flex flex-col gap-2 rounded-md border p-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      교육 시작일
+                    </label>
                     <Input
-                      placeholder={`선택지 ${i + 1}`}
-                      value={opt}
-                      onChange={(e) => updateOption(i, e.target.value)}
+                      type="date"
+                      value={trainingStart}
+                      onChange={(e) => setTrainingStart(e.target.value)}
                       disabled={isSaving}
                     />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => removeOption(i)}
-                      disabled={isSaving}
-                      title="삭제"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
                   </div>
-                ))
-              )}
-              {editing && options.length > 0 && (
-                <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                  ⚠ 이미 투표가 진행된 문서의 선택지를 수정하면 기존 투표 결과가
-                  모두 삭제됩니다.
-                </p>
-              )}
-            </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      교육 종료일 (하루면 비움)
+                    </label>
+                    <Input
+                      type="date"
+                      value={trainingEnd}
+                      min={trainingStart || undefined}
+                      onChange={(e) => setTrainingEnd(e.target.value)}
+                      disabled={isSaving}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      교육구분
+                    </label>
+                    <select
+                      value={trainingType}
+                      onChange={(e) => setTrainingType(e.target.value)}
+                      disabled={isSaving}
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                    >
+                      {TRAINING_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      대상 직책
+                    </label>
+                    <select
+                      value={targetPosition}
+                      onChange={(e) => setTargetPosition(e.target.value)}
+                      disabled={isSaving}
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                    >
+                      <option value="">전체</option>
+                      {TARGET_POSITIONS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 투표 선택지 */}
+            {!isTraining && (
+              <div className="flex flex-col gap-2 rounded-md border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">
+                    투표 선택지 (선택)
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={addOption}
+                    disabled={isSaving}
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    항목 추가
+                  </Button>
+                </div>
+                {options.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    선택지를 추가하면 직원이 투표할 수 있습니다. 비워두면 일반
+                    확인 문서입니다.
+                  </p>
+                ) : (
+                  options.map((opt, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <Input
+                        placeholder={`선택지 ${i + 1}`}
+                        value={opt}
+                        onChange={(e) => updateOption(i, e.target.value)}
+                        disabled={isSaving}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => removeOption(i)}
+                        disabled={isSaving}
+                        title="삭제"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+                {editing && options.length > 0 && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    ⚠ 이미 투표가 진행된 문서의 선택지를 수정하면 기존 투표 결과가
+                    모두 삭제됩니다.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm">필독 문서로 표시</span>
+              <span className="text-sm">필독 {noun}로 표시</span>
               <Button
                 type="button"
                 variant={isRequired ? "default" : "outline"}
@@ -576,7 +703,7 @@ export function DocumentAdminContent({ inDialog }: ContentProps = {}) {
 
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-muted-foreground">
-                확인·투표 마감일 (선택)
+                {isTraining ? "확인 마감일 (선택)" : "확인·투표 마감일 (선택)"}
               </label>
               <Input
                 type="date"
@@ -673,8 +800,12 @@ export function DocumentAdmin({
 }
 
 // ─── 확인 현황 Dialog ─────────────────────────────────────────
-// 확인 / 미확인 탭으로 전체 직원 대비 열람 현황을 보여준다.
-// 관리자는 조회만 가능 — 확인 기록을 생성·수정·삭제하지 않는다.
+// 확인 / 사유 있음 / 미확인 탭으로 대상 직원 대비 열람 현황을 보여준다.
+// 관리자는 확인 기록을 생성·수정·삭제하지 않는다. 휴가·병가·휴직 등으로
+// 확인하지 못한 직원에게 사유만 지정할 수 있다(본인이 확인하면 확인이 우선).
+type StaffRow = Pick<Employee, "staff_id" | "staff_name" | "staff_position">;
+type ExemptRow = StaffRow & { exemption: DocumentReadExemption };
+
 function DocumentReadsDialog({
   document,
   onClose,
@@ -682,13 +813,21 @@ function DocumentReadsDialog({
   document: Document;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"read" | "unread">("read");
+  const { employee } = useAuth();
+  const isTraining = document.category === "training";
+  const [tab, setTab] = useState<"read" | "exempt" | "unread">("read");
   const [reads, setReads] = useState<DocumentReadWithEmployee[]>([]);
-  const [unread, setUnread] = useState<
-    Pick<Employee, "staff_id" | "staff_name" | "staff_position">[]
-  >([]);
+  const [targets, setTargets] = useState<StaffRow[]>([]);
+  const [exemptions, setExemptions] = useState<DocumentReadExemption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 사유 지정 중인 직원
+  const [exemptTarget, setExemptTarget] = useState<StaffRow | null>(null);
+  const [exemptReason, setExemptReason] = useState<string>(
+    EXEMPTION_REASONS[0]
+  );
+  const [exemptNote, setExemptNote] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -704,6 +843,12 @@ function DocumentReadsDialog({
           .order("confirmed_at", { ascending: true });
         if (rErr) throw rErr;
 
+        const { data: exData, error: eErr } = await supabase
+          .from("document_read_exemptions")
+          .select("*")
+          .eq("document_id", document.id);
+        if (eErr) throw eErr;
+
         // 전체 직원 (role 로 관리자 제외)
         const { data: staffData, error: sErr } = await supabase
           .from("coworker_list")
@@ -713,36 +858,47 @@ function DocumentReadsDialog({
         if (!active) return;
         const rawReads = (readData as DocumentRead[]) ?? [];
         // 확인 대상에서 제외: ① 이름에 "결원" 포함된 가상 직원(quarter-balance 와 동일),
-        //                    ② 관리자(role='admin') — 문서 확인 의무 없음.
+        //                    ② 관리자(role='admin') — 문서 확인 의무 없음,
+        //                    ③ 직책이 기관사·차장이 아닌 직원,
+        //                    ④ 대상 직책이 정해진 교육이면 다른 직책.
         const allStaff = (
           (staffData as Pick<
             Employee,
             "staff_id" | "staff_name" | "staff_position" | "role"
           >[]) ?? []
-        ).filter(
-          (s) => !s.staff_name.includes("결원") && s.role !== "admin"
-        );
+        )
+          .map((s) => ({ ...s, staff_position: s.staff_position?.trim() }))
+          .filter(
+            (s) =>
+              !s.staff_name.includes("결원") &&
+              s.role !== "admin" &&
+              (TARGET_POSITIONS as readonly string[]).includes(
+                s.staff_position
+              ) &&
+              (!document.target_position ||
+                s.staff_position === document.target_position)
+          );
 
         // staff_id → 직원 정보 매핑
         const empMap = new Map(allStaff.map((s) => [s.staff_id, s]));
 
-        // 확인 기록에 직원 정보 결합
-        const readList: DocumentReadWithEmployee[] = rawReads.map((r) => {
+        // 확인 기록에 직원 정보 결합 — 대상 직원(기관사·차장)의 기록만 남긴다.
+        const readList: DocumentReadWithEmployee[] = rawReads.flatMap((r) => {
           const emp = empMap.get(r.staff_id);
-          return {
-            ...r,
-            employee: emp
-              ? {
-                  staff_name: emp.staff_name,
-                  staff_position: emp.staff_position,
-                }
-              : null,
-          };
+          if (!emp) return [];
+          return [
+            {
+              ...r,
+              employee: {
+                staff_name: emp.staff_name,
+                staff_position: emp.staff_position,
+              },
+            },
+          ];
         });
         setReads(readList);
-
-        const readIds = new Set(rawReads.map((r) => r.staff_id));
-        setUnread(allStaff.filter((s) => !readIds.has(s.staff_id)));
+        setTargets(allStaff);
+        setExemptions((exData as DocumentReadExemption[]) ?? []);
       } catch (err) {
         if (active)
           setError(
@@ -757,42 +913,163 @@ function DocumentReadsDialog({
     return () => {
       active = false;
     };
-  }, [document.id]);
+  }, [document.id, document.target_position]);
 
-  const total = reads.length + unread.length;
+  // 확인 > 사유 > 미확인 순으로 분류한다.
+  const readIds = new Set(reads.map((r) => r.staff_id));
+  const exemptMap = new Map(exemptions.map((e) => [e.staff_id, e]));
+  const exempt: ExemptRow[] = [];
+  const unread: StaffRow[] = [];
+  for (const s of targets) {
+    if (readIds.has(s.staff_id)) continue;
+    const ex = exemptMap.get(s.staff_id);
+    if (ex) exempt.push({ ...s, exemption: ex });
+    else unread.push(s);
+  }
 
-  // 엑셀 출력 — 시트1: 확인자 명단, 시트2: 미확인자 명단.
+  const total = reads.length + exempt.length + unread.length;
+
+  const openExempt = (s: StaffRow) => {
+    setExemptTarget(s);
+    setExemptReason(EXEMPTION_REASONS[0]);
+    setExemptNote("");
+  };
+
+  const saveExempt = async () => {
+    if (!exemptTarget) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const { data, error: upErr } = await supabase
+        .from("document_read_exemptions")
+        .upsert(
+          {
+            document_id: document.id,
+            staff_id: exemptTarget.staff_id,
+            reason: exemptReason,
+            note: exemptNote.trim() || null,
+            created_by: employee?.staff_id ?? null,
+          },
+          { onConflict: "document_id,staff_id" }
+        )
+        .select("*")
+        .single();
+      if (upErr) throw upErr;
+      const saved = data as DocumentReadExemption;
+      setExemptions((prev) => [
+        ...prev.filter((e) => e.staff_id !== saved.staff_id),
+        saved,
+      ]);
+      setExemptTarget(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "사유 저장에 실패했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const removeExempt = async (ex: DocumentReadExemption) => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const { error: delErr } = await supabase
+        .from("document_read_exemptions")
+        .delete()
+        .eq("id", ex.id);
+      if (delErr) throw delErr;
+      setExemptions((prev) => prev.filter((e) => e.id !== ex.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "사유 해제에 실패했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 엑셀 출력 — 확인은 직책별 시트('기관사 확인 N', '차장 확인 N'),
+  // 사유·미확인은 직책 열을 둔 통합 시트('사유 N', '미확인 N').
+  // 대상 직책이 정해진 교육은 그 직책의 확인 시트만 나온다.
   const exportExcel = () => {
-    const readSheet = reads.map((r) => ({
-      이름: r.employee?.staff_name ?? `#${r.staff_id}`,
-      직책: r.employee?.staff_position ?? "",
-      확인시각: format(new Date(r.confirmed_at), "yyyy-MM-dd HH:mm"),
-    }));
-    const unreadSheet = unread.map((s) => ({
-      이름: s.staff_name,
-      직책: s.staff_position,
-    }));
-
     const wb = XLSX.utils.book_new();
+    // 통합 시트는 기관사 → 차장, 같은 직책 안에서는 이름순.
+    const byPosition = <T extends StaffRow>(a: T, b: T) =>
+      TARGET_POSITIONS.indexOf(a.staff_position as never) -
+        TARGET_POSITIONS.indexOf(b.staff_position as never) ||
+      a.staff_name.localeCompare(b.staff_name, "ko");
+
+    const positions = document.target_position
+      ? [document.target_position]
+      : TARGET_POSITIONS;
+    for (const pos of positions) {
+      const rows = reads
+        .filter((r) => r.employee?.staff_position === pos)
+        .map((r) => ({
+          이름: r.employee?.staff_name ?? `#${r.staff_id}`,
+          ...(isTraining
+            ? { 교육일자: r.training_date ?? "", 근무: r.training_shift ?? "" }
+            : {}),
+          확인시각: format(new Date(r.confirmed_at), "yyyy-MM-dd HH:mm"),
+          ...(isTraining
+            ? {
+                수정시각: r.training_updated_at
+                  ? format(
+                      new Date(r.training_updated_at),
+                      "yyyy-MM-dd HH:mm"
+                    )
+                  : "",
+              }
+            : {}),
+        }));
+      XLSX.utils.book_append_sheet(
+        wb,
+        // header 를 넘기면 빈 시트에도 제목 행이 남는다.
+        XLSX.utils.json_to_sheet(rows, {
+          header: isTraining
+            ? ["이름", "교육일자", "근무", "확인시각", "수정시각"]
+            : ["이름", "확인시각"],
+        }),
+        `${pos} 확인 ${rows.length}`
+      );
+    }
+
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.json_to_sheet(
-        readSheet.length > 0
-          ? readSheet
-          : [{ 이름: "", 직책: "", 확인시각: "" }]
+        [...exempt].sort(byPosition).map((s) => ({
+          이름: s.staff_name,
+          직책: s.staff_position,
+          사유: s.exemption.reason,
+          메모: s.exemption.note ?? "",
+        })),
+        { header: ["이름", "직책", "사유", "메모"] }
       ),
-      `확인 ${reads.length}`
+      `사유 ${exempt.length}`
     );
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.json_to_sheet(
-        unreadSheet.length > 0 ? unreadSheet : [{ 이름: "", 직책: "" }]
+        [...unread]
+          .sort(byPosition)
+          .map((s) => ({ 이름: s.staff_name, 직책: s.staff_position })),
+        { header: ["이름", "직책"] }
       ),
       `미확인 ${unread.length}`
     );
+
     const safeTitle = document.title.replace(/[\\/:*?"<>|]/g, "_");
-    XLSX.writeFile(wb, `확인현황_${safeTitle}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `${isTraining ? "교육확인현황" : "확인현황"}_${safeTitle}.xlsx`
+    );
   };
+
+  const nameCell = (name: string, position: string | null | undefined) => (
+    <span className="text-sm font-medium">
+      {name}
+      <span className="ml-1.5 text-xs text-muted-foreground">
+        {position ?? ""}
+      </span>
+    </span>
+  );
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -806,7 +1083,7 @@ function DocumentReadsDialog({
                   total > 0
                     ? Math.round((reads.length / total) * 100)
                     : 0
-                }%)`}
+                }%)${document.target_position ? ` · 대상 ${document.target_position}` : ""}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -829,6 +1106,7 @@ function DocumentReadsDialog({
           {(
             [
               { key: "read", label: `확인 ${reads.length}` },
+              { key: "exempt", label: `사유 ${exempt.length}` },
               { key: "unread", label: `미확인 ${unread.length}` },
             ] as const
           ).map((t) => (
@@ -865,34 +1143,71 @@ function DocumentReadsDialog({
                   key={r.id}
                   className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
                 >
-                  <span className="text-sm font-medium">
-                    {r.employee?.staff_name ?? `#${r.staff_id}`}
-                    <span className="ml-1.5 text-xs text-muted-foreground">
-                      {r.employee?.staff_position ?? ""}
-                    </span>
-                  </span>
-                  <span className="text-xs text-muted-foreground tabular-nums">
+                  {nameCell(
+                    r.employee?.staff_name ?? `#${r.staff_id}`,
+                    r.employee?.staff_position
+                  )}
+                  <span className="text-xs text-muted-foreground tabular-nums text-right">
+                    {isTraining && r.training_date && (
+                      <span className="block">
+                        교육 {r.training_date.slice(5).replace("-", ".")}
+                        {r.training_shift && ` · ${r.training_shift}`}
+                        {r.training_updated_at && " (수정됨)"}
+                      </span>
+                    )}
                     {format(new Date(r.confirmed_at), "MM.dd HH:mm")}
                   </span>
                 </div>
               ))
             )
+          ) : tab === "exempt" ? (
+            exempt.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">
+                사유가 지정된 직원이 없습니다.
+              </p>
+            ) : (
+              exempt.map((s) => (
+                <div
+                  key={s.staff_id}
+                  className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    {nameCell(s.staff_name, s.staff_position)}
+                    <p className="text-xs text-muted-foreground truncate">
+                      {s.exemption.reason}
+                      {s.exemption.note && ` · ${s.exemption.note}`}
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => removeExempt(s.exemption)}
+                    disabled={isSaving}
+                  >
+                    해제
+                  </Button>
+                </div>
+              ))
+            )
           ) : unread.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
-              모든 직원이 확인했습니다.
+              미확인 직원이 없습니다.
             </p>
           ) : (
             unread.map((s) => (
               <div
                 key={s.staff_id}
-                className="flex items-center gap-2 rounded-md border px-3 py-2"
+                className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
               >
-                <span className="text-sm font-medium">
-                  {s.staff_name}
-                  <span className="ml-1.5 text-xs text-muted-foreground">
-                    {s.staff_position}
-                  </span>
-                </span>
+                {nameCell(s.staff_name, s.staff_position)}
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => openExempt(s)}
+                  disabled={isSaving}
+                >
+                  사유 지정
+                </Button>
               </div>
             ))
           )}
@@ -902,6 +1217,54 @@ function DocumentReadsDialog({
           닫기
         </Button>
       </DialogContent>
+
+      {/* 사유 지정 */}
+      <Dialog
+        open={!!exemptTarget}
+        onOpenChange={(o) => !o && setExemptTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>미확인 사유 지정</DialogTitle>
+            <DialogDescription>
+              {exemptTarget?.staff_name} ({exemptTarget?.staff_position}) — 본인이
+              나중에 확인하면 확인으로 바뀝니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-4 gap-1.5">
+            {EXEMPTION_REASONS.map((r) => (
+              <Button
+                key={r}
+                type="button"
+                variant={exemptReason === r ? "default" : "outline"}
+                size="sm"
+                onClick={() => setExemptReason(r)}
+                disabled={isSaving}
+              >
+                {r}
+              </Button>
+            ))}
+          </div>
+          <Input
+            placeholder="메모 (선택, 예: 10/1~10/31 병가)"
+            value={exemptNote}
+            onChange={(e) => setExemptNote(e.target.value)}
+            disabled={isSaving}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setExemptTarget(null)}
+              disabled={isSaving}
+            >
+              취소
+            </Button>
+            <Button onClick={saveExempt} disabled={isSaving}>
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

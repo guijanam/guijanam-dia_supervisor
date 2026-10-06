@@ -40,6 +40,7 @@ import {
   ClipboardList,
   Repeat,
   PhoneCall,
+  GraduationCap,
 } from "lucide-react";
 
 type AdminPage =
@@ -47,6 +48,7 @@ type AdminPage =
   | "losers"
   | "announce"
   | "document"
+  | "training"
   | "pin"
   | "reference"
   | "patterns";
@@ -227,6 +229,12 @@ export function AdminDashboard() {
             onClick={() => setPage("document")}
           />
           <SidebarItem
+            icon={GraduationCap}
+            label="교육훈련"
+            active={page === "training"}
+            onClick={() => setPage("training")}
+          />
+          <SidebarItem
             icon={KeyRound}
             label="PIN 초기화"
             active={page === "pin"}
@@ -294,7 +302,20 @@ export function AdminDashboard() {
                   조회합니다.
                 </p>
               </div>
-              <DocumentAdminContent />
+              <DocumentAdminContent category="document" />
+            </div>
+          )}
+          {page === "training" && (
+            <div className="flex flex-1 flex-col min-w-0 gap-3 p-4 overflow-auto">
+              <div>
+                <h2 className="text-base font-bold">교육훈련 관리</h2>
+                <p className="text-sm text-muted-foreground">
+                  교육 자료를 등록하면 직원이 열람 후 확인 버튼으로 서명합니다.
+                  확인 현황에서 미확인자에게 휴가·병가·휴직 사유를 지정하고
+                  엑셀로 내려받을 수 있습니다.
+                </p>
+              </div>
+              <DocumentAdminContent category="training" />
             </div>
           )}
           {page === "pin" && <PinResetPanel />}
