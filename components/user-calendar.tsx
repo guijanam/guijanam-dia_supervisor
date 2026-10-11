@@ -641,7 +641,7 @@ export function UserCalendar() {
                 )}
                 {jigeunKind && (
                   <span className="text-[9px] font-bold leading-none text-center text-sky-700 dark:text-sky-300">
-                    {getJigeunBadgeLabel(jigeunKind)}
+                    {getJigeunBadgeLabel(jigeunKind, turn)}
                   </span>
                 )}
                 {lostDates.has(date) && (

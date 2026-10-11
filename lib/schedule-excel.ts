@@ -199,7 +199,7 @@ export function buildEmployeeMonthCells(args: {
     // 두 줄로 적는다. 지근은 기존처럼 한 줄로 병기한다(예: 58(지근)).
     const text = !special
       ? kind
-        ? `${turnText} ${getJigeunBadgeLabel(kind)}`
+        ? `${turnText} ${getJigeunBadgeLabel(kind, turn)}`
         : turnText
       : special === "지휴"
         ? turnText

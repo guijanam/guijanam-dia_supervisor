@@ -55,6 +55,8 @@ async function render(result, check) {
   }
 }
 
+test.beforeEach(() => { window.localStorage.clear(); });
+
 test("공지가 없으면 빈 팝업과 버튼을 표시하지 않는다", async () => {
   await render({ data: [], error: null }, (container) => {
     assert.equal(document.querySelector('[role="dialog"]'), null);
@@ -90,4 +92,66 @@ test("공지 조회 후 자동 팝업, 닫기, 재열기 및 포커스 복원", 
     await act(async () => { document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     assert.equal(document.querySelector('[role="dialog"]'), null);
   });
+});
+
+test("다시 보지 않기를 체크하면 재마운트 후 자동 팝업을 숨기고 수동으로 다시 볼 수 있다", async () => {
+  await render({ data: [notice], error: null }, async () => {
+    const checkbox = document.querySelector('input[type="checkbox"]');
+    assert.ok(checkbox, "다시 보지 않기 체크박스가 있어야 합니다");
+    assert.match(checkbox.labels[0].textContent, /다시 보지 않기/);
+    await act(async () => { checkbox.click(); });
+    assert.equal(checkbox.checked, true);
+  });
+  await render({ data: [notice], error: null }, async (container) => {
+    assert.equal(document.querySelector('[role="dialog"]'), null);
+    await act(async () => { container.querySelector("button").click(); });
+    assert.ok(document.querySelector('[role="dialog"]'));
+    assert.equal(document.querySelector('input[type="checkbox"]').checked, true);
+  });
+});
+
+test("숨김 해제 후에는 자동 팝업을 다시 표시한다", async () => {
+  await render({ data: [notice], error: null }, async () => {
+    const checkbox = document.querySelector('input[type="checkbox"]');
+    await act(async () => { checkbox.click(); });
+    await act(async () => { checkbox.click(); });
+    assert.equal(checkbox.checked, false);
+  });
+  await render({ data: [notice], error: null }, () => {
+    assert.ok(document.querySelector('[role="dialog"]'));
+  });
+});
+
+test("새 공지나 수정된 공지는 이전 숨김 설정과 관계없이 자동으로 표시한다", async () => {
+  await render({ data: [notice], error: null }, async () => {
+    await act(async () => { document.querySelector('input[type="checkbox"]').click(); });
+  });
+  for (const items of [
+    [{ ...notice, updated_at: "2026-10-02T00:00:00Z" }],
+    [notice, { ...notice, id: "notice-2" }],
+  ]) {
+    await render({ data: items, error: null }, () => {
+      assert.ok(document.querySelector('[role="dialog"]'));
+      assert.equal(document.querySelector('input[type="checkbox"]').checked, false);
+    });
+  }
+});
+
+test("브라우저 저장소가 차단되어도 공지 열람과 체크 조작이 가능하다", async () => {
+  const prototype = Object.getPrototypeOf(window.localStorage);
+  const getItem = prototype.getItem;
+  const setItem = prototype.setItem;
+  prototype.getItem = () => { throw new Error("Storage blocked"); };
+  prototype.setItem = () => { throw new Error("Storage blocked"); };
+  try {
+    await render({ data: [notice], error: null }, async () => {
+      assert.ok(document.querySelector('[role="dialog"]'));
+      const checkbox = document.querySelector('input[type="checkbox"]');
+      await act(async () => { checkbox.click(); });
+      assert.equal(checkbox.checked, true);
+    });
+  } finally {
+    prototype.getItem = getItem;
+    prototype.setItem = setItem;
+  }
 });

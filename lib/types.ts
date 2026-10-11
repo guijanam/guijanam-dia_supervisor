@@ -139,11 +139,12 @@ export function isJigeunTurn(turn: string, s: JigeunTurnSettings): boolean {
 }
 
 // 화면·엑셀 공통 배지 텍스트.
-// 주의: 'night' 의 반환값은 requests-panel.tsx 의 DESIGNATED_NIGHT_TURN
-// ('지(야)') 과 의도적으로 같은 문자열이다 — 연휴 치환 경로와 지정근무 번호
-// 경로가 같은 라벨로 수렴해야 사용자에게 하나의 개념으로 보인다.
-export function getJigeunBadgeLabel(kind: JigeunKind): string {
-  return kind === "day" ? "지(주)" : "지(야)";
+// 야간 지정근무 중 휴72만 비번 표시를 덧붙인다. 근무 판정·집계는 바꾸지 않는다.
+// turn 은 배경색/지정근무 판정과 같은 치환 후 근무번호를 전달한다.
+// turn 없는 호출은 연휴 치환 판정에 쓰이므로 기존 기본 라벨을 유지한다.
+export function getJigeunBadgeLabel(kind: JigeunKind, turn?: string | null): string {
+  if (kind === "day") return "지(주)";
+  return turn === "휴72" ? "지(야)비" : "지(야)";
 }
 
 // 화면에 지정근무('지(주)' / '지(야)')로 표시되는 날인지. 위 주석의 두 경로를

@@ -1033,7 +1033,7 @@ export function RequestsPanel({
                       const kind = turn ? getJigeunKind(turn, jigeunTurns) : null;
                       return kind ? (
                         <span className="ml-1 text-[10px] font-bold text-sky-700 dark:text-sky-300">
-                          {getJigeunBadgeLabel(kind)}
+                          {getJigeunBadgeLabel(kind, turn)}
                         </span>
                       ) : null;
                     })()}

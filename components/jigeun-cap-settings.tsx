@@ -516,7 +516,7 @@ export function JigeunCapSettings({
               </div>
               <p className="text-xs text-muted-foreground pl-[6.75rem]">
                 야간 지정근무로 표시할 근무번호를 쉼표로 구분해 입력하세요.
-                달력·엑셀에 <b>지(야)</b> 로 표시됩니다. 두 칸 모두 요일/공휴일과
+                달력·엑셀에 <b>지(야)</b> 로 표시되며, 휴72는 <b>지(야)비</b> 로 표시됩니다. 두 칸 모두 요일/공휴일과
                 무관하게 적용되며, 같은 번호를 주간·야간에 함께 넣을 수 없습니다.
               </p>
             </div>

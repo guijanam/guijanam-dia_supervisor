@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Announcement } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,7 +12,15 @@ import {
   DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 
+const DISMISSED_KEY = "guijanam:announcements:dismissed:v1";
+
+function announcementVersion(items: Announcement[]) {
+  return JSON.stringify(items.map((item) => [item.id, item.updated_at]).sort());
+}
+
 export function AnnouncementBoard() {
+  const checkboxId = useId();
+  const [dontShowAgain, setDontShowAgain] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [items, setItems] = useState<Announcement[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,7 +39,14 @@ export function AnnouncementBoard() {
         if (active) {
           const announcements = (data as Announcement[]) ?? [];
           setItems(announcements);
-          setIsOpen(announcements.length > 0);
+          let dismissed = false;
+          try {
+            dismissed = window.localStorage.getItem(DISMISSED_KEY) === announcementVersion(announcements);
+          } catch {
+            // 저장소 접근이 차단되어도 공지 조회와 열람은 유지한다.
+          }
+          setDontShowAgain(dismissed);
+          setIsOpen(announcements.length > 0 && !dismissed);
         }
       } catch (err) {
         if (active)
@@ -46,6 +61,19 @@ export function AnnouncementBoard() {
       active = false;
     };
   }, []);
+
+  function handleDontShowAgain(checked: boolean) {
+    setDontShowAgain(checked);
+    try {
+      if (checked) {
+        window.localStorage.setItem(DISMISSED_KEY, announcementVersion(items));
+      } else {
+        window.localStorage.removeItem(DISMISSED_KEY);
+      }
+    } catch {
+      // 저장 불가 환경에서는 현재 화면의 선택만 유지한다.
+    }
+  }
 
   if (isLoading) {
     return (
@@ -104,7 +132,17 @@ export function AnnouncementBoard() {
             </article>
           ))}
         </div>
-        <DialogFooter className="shrink-0">
+        <DialogFooter className="shrink-0 gap-3 sm:items-center sm:justify-between">
+          <label htmlFor={checkboxId} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+            <input
+              id={checkboxId}
+              type="checkbox"
+              checked={dontShowAgain}
+              onChange={(event) => handleDontShowAgain(event.target.checked)}
+              className="size-4 accent-primary"
+            />
+            다시 보지 않기
+          </label>
           <DialogClose asChild>
             <Button>확인</Button>
           </DialogClose>
