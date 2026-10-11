@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { writeWithRequestSource } from "@/lib/request-source";
 import type {
   Employee,
   RecordType,
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 import type { DayEntry } from "@/components/user-calendar";
 
 interface DayModalProps {
+  requestSource?: "user" | "admin";
   employee: Employee;
   date: string | null;
   regularTurn: string | null;
@@ -55,6 +57,7 @@ interface DayModalProps {
 }
 
 export function DayModal({
+  requestSource = "user",
   employee,
   date,
   regularTurn,
@@ -108,9 +111,8 @@ export function DayModal({
     setIsSaving(true);
     setError(null);
     try {
-      const { error: upsertError } = await supabase
-        .from("special_schedules")
-        .upsert(
+      const { error: upsertError } = await writeWithRequestSource(
+        (payload) => supabase.from("special_schedules").upsert(payload, { onConflict: "staff_id,target_date" }),
           {
             staff_id: employee.staff_id,
             target_date: date,
@@ -125,7 +127,7 @@ export function DayModal({
             lottery_status: null,
             lottery_at: null,
           },
-          { onConflict: "staff_id,target_date" }
+          requestSource
         );
       if (upsertError) throw upsertError;
       onChanged();

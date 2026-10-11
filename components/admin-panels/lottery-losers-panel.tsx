@@ -342,9 +342,8 @@ export function LotteryLosersPanel() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("추첨 탈락자");
     ws.columns = [
-      { header: "사번", width: 12 },
       { header: "직책", width: 10 },
-      { header: "이름", width: 10 },
+      { header: "이름", width: 22 },
       { header: "전화번호", width: 16 },
       { header: "탈락건수", width: 10 },
       { header: "탈락날짜", width: 40 },
@@ -353,9 +352,8 @@ export function LotteryLosersPanel() {
 
     for (const r of filtered) {
       const row = ws.addRow([
-        r.employee_number ?? "",
         r.staff_position,
-        r.staff_name,
+        r.employee_number ? `${r.staff_name}(${r.employee_number})` : r.staff_name,
         r.phone_number ?? "",
         r.dates.length,
         r.dates
@@ -363,7 +361,7 @@ export function LotteryLosersPanel() {
           .join(", "),
       ]);
       // 전화번호는 선행 0 이 살아야 하므로 문자열로 강제한다.
-      row.getCell(4).numFmt = "@";
+      row.getCell(3).numFmt = "@";
     }
     ws.views = [{ state: "frozen", ySplit: 1 }];
 

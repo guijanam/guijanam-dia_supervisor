@@ -60,6 +60,7 @@ const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 type UserView = "notice" | "training" | "calendar";
 
 export interface DayEntry {
+  request_source?: SpecialSchedule["request_source"];
   id: string;
   staff_id: number;
   staff_name: string;

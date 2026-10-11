@@ -1,5 +1,6 @@
 "use client";
 
+import { getRequestBadgeClass } from "@/lib/request-source";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchScheduleByRange } from "@/lib/fetch-schedule";
@@ -190,7 +191,7 @@ export function AdminEmployeeCalendarView({
           fetchScheduleByRange(padded.start, padded.end),
           supabase
             .from("special_schedules")
-            .select("id, staff_id, target_date, record_type, lottery_status")
+            .select("*")
             .gte("target_date", start)
             .lte("target_date", end)
             .order("target_date", { ascending: true }),
@@ -289,6 +290,7 @@ export function AdminEmployeeCalendarView({
         target_date: string;
         record_type: RecordType;
         lottery_status: LotteryStatus | null;
+        request_source?: SpecialSchedule["request_source"];
       }>;
 
       // 추첨 탈락 건은 신청내역에서 뺀다(날짜만 lostDates 에 남긴다).
@@ -354,6 +356,7 @@ export function AdminEmployeeCalendarView({
           regularTurn:
             displayByStaff.get(`${row.staff_id}|${row.target_date}`) ?? null,
           lottery_status: row.lottery_status ?? null,
+          request_source: row.request_source ?? null,
         };
 
         // 본인이라도 직책이 다르게 조회되면(데이터 불일치) 정원에서는 뺀다.
@@ -546,6 +549,7 @@ export function AdminEmployeeCalendarView({
                     return (
                       <span
                         key={e.id}
+                        aria-label={`${e.staff_name} ${e.record_type}${e.request_source === "admin" ? " 관리자 등록" : ""}`}
                         title={
                           isSelf
                             ? `${e.staff_name} ${e.record_type}`
@@ -553,11 +557,7 @@ export function AdminEmployeeCalendarView({
                         }
                         className={cn(
                           "text-[9px] font-bold rounded px-1 truncate",
-                          e.record_type === "지휴"
-                            ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
-                            : e.staff_position === "차장"
-                              ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
-                              : "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
+                          getRequestBadgeClass(e),
                           isSelf && "ring-1 ring-primary"
                         )}
                       >
@@ -573,6 +573,7 @@ export function AdminEmployeeCalendarView({
       </div>
 
       <DayModal
+        requestSource="admin"
         employee={targetEmployee}
         date={selectedDate}
         regularTurn={

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ExcelJS from "exceljs";
+import { getRequestBadgeClass, writeWithRequestSource } from "@/lib/request-source";
 import { supabase } from "@/lib/supabase";
 import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import { useAuth } from "@/lib/auth-context";
@@ -82,6 +83,7 @@ import { AdminEmployeeCalendarView } from "@/components/admin-employee-calendar-
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 interface SpecialEntry {
+  request_source?: "user" | "admin" | null;
   id: string;
   staff_id: number;
   staff_name: string;
@@ -206,9 +208,7 @@ export function AdminCalendar() {
         await Promise.all([
           supabase
             .from("special_schedules")
-            .select(
-              "id, staff_id, target_date, record_type, lottery_status, lottery_at"
-            )
+            .select("*")
             .gte("target_date", start)
             .lte("target_date", end)
             .order("target_date", { ascending: true }),
@@ -302,6 +302,7 @@ export function AdminCalendar() {
         record_type: RecordType;
         lottery_status: LotteryStatus | null;
         lottery_at: string | null;
+        request_source?: "user" | "admin" | null;
       }>;
 
       // staff_id → 직원 정보 매핑
@@ -343,6 +344,7 @@ export function AdminCalendar() {
             )?.substituted ?? null,
           lottery_status: row.lottery_status ?? null,
           lottery_at: row.lottery_at ?? null,
+          request_source: row.request_source ?? null,
         };
         const arr = sMap.get(row.target_date);
         if (arr) arr.push(entry);
@@ -559,15 +561,14 @@ export function AdminCalendar() {
     setAddBusy(true);
     setAddError(null);
     try {
-      const { error: upErr } = await supabase
-        .from("special_schedules")
-        .upsert(
+      const { error: upErr } = await writeWithRequestSource(
+        (payload) => supabase.from("special_schedules").upsert(payload, { onConflict: "staff_id,target_date" }),
           {
             staff_id: Number(addStaffId),
             target_date: selectedDate,
             record_type: addType,
           },
-          { onConflict: "staff_id,target_date" }
+          "admin"
         );
       if (upErr) throw upErr;
       setAddStaffId("");
@@ -661,14 +662,12 @@ export function AdminCalendar() {
     for (const pos of POSITIONS) {
       const ws = wb.addWorksheet(pos);
       ws.columns = [
-        { width: 12 },
-        { width: 12 },
+        { width: 22 },
         { width: 11 },
         ...allDates.map(() => ({ width: 9 })),
       ];
 
       const headerRow = ws.addRow([
-        "사번",
         "이름",
         "총휴무갯수",
         ...allDates.map((d) => `${Number(d.slice(8, 10))}일(${getDayName(d)})`),
@@ -679,7 +678,7 @@ export function AdminCalendar() {
       allDates.forEach((date, i) => {
         const color = getDayExcelColor(date, holidaySet);
         if (color)
-          headerRow.getCell(i + 4).font = { bold: true, color: { argb: color } };
+          headerRow.getCell(i + 3).font = { bold: true, color: { argb: color } };
       });
 
       for (const emp of employees.filter((e) => e.staff_position === pos)) {
@@ -692,14 +691,13 @@ export function AdminCalendar() {
         });
 
         const row = ws.addRow([
-          emp.employee_number ?? "",
-          emp.staff_name,
+          emp.employee_number ? `${emp.staff_name}(${emp.employee_number})` : emp.staff_name,
           monthRestTotal(totals),
           ...cells.map((c) => c.text),
         ]);
         // 운휴대기 칸은 두 줄이라 줄바꿈을 켠다.
         row.alignment = { horizontal: "center", wrapText: true };
-        row.getCell(2).alignment = { horizontal: "left" };
+        row.getCell(1).alignment = { horizontal: "left" };
         // 배경색 규칙은 getTurnExcelFill 에 모아둔다. 우선순위는
         // 신청 지근·지휴 > 휴무·운휴 > 운휴대기 치환 > 지정근무이고,
         // 실제 색은 관리자 설정(excelColors)에서 온다.
@@ -714,7 +712,7 @@ export function AdminCalendar() {
             excelColors
           );
           if (argb) {
-            row.getCell(i + 4).fill = {
+            row.getCell(i + 3).fill = {
               type: "pattern",
               pattern: "solid",
               fgColor: { argb },
@@ -723,7 +721,7 @@ export function AdminCalendar() {
         });
       }
 
-      ws.views = [{ state: "frozen", xSplit: 3, ySplit: 1 }];
+      ws.views = [{ state: "frozen", xSplit: 2, ySplit: 1 }];
     }
 
     await downloadWorkbook(wb, `월간근무표_${monthValue}.xlsx`);
@@ -769,7 +767,7 @@ export function AdminCalendar() {
   };
 
   // 분기 병합 근무표 엑셀: 직책별 시트, 직원 1명 = 3행(그 분기의 달마다 1행).
-  // 사번·이름·분기 총휴무는 그 3행에 걸쳐 세로 병합한다.
+  // 이름(사번)·분기 총휴무는 그 3행에 걸쳐 세로 병합한다.
   //
   // 달마다 날짜 수가 다르므로 1~31일 열을 공유한다. 30일까지인 달은 31일 칸이
   // 빈칸이 된다.
@@ -793,16 +791,15 @@ export function AdminCalendar() {
     // 열은 1~31일로 고정한다. 달마다 말일이 달라도 같은 열에 같은 '일' 이 온다.
     const maxDays = Math.max(...monthMaps.map((m) => m.dates.length));
     const dayNumbers = Array.from({ length: maxDays }, (_, i) => i + 1);
-    // 앞 5열: 사번·이름·총휴무갯수·월·월휴무
-    const FIXED_COLS = 5;
+    // 앞 4열: 이름(사번)·총휴무갯수·월·월휴무
+    const FIXED_COLS = 4;
 
     const wb = new ExcelJS.Workbook();
 
     for (const pos of POSITIONS) {
       const ws = wb.addWorksheet(pos);
       ws.columns = [
-        { width: 12 },
-        { width: 12 },
+        { width: 22 },
         { width: 11 },
         { width: 7 },
         { width: 8 },
@@ -810,7 +807,6 @@ export function AdminCalendar() {
       ];
 
       const headerRow = ws.addRow([
-        "사번",
         "이름",
         "총휴무갯수",
         "월",
@@ -840,7 +836,6 @@ export function AdminCalendar() {
           const row = ws.addRow([
             "",
             "",
-            "",
             monthLabel,
             monthRestTotal(totals),
             ...dayNumbers.map((n) => cells[n - 1]?.text ?? ""),
@@ -867,17 +862,18 @@ export function AdminCalendar() {
           });
         });
 
-        // 사번·이름·분기 총휴무를 이 직원 블록 전체에 걸쳐 세로 병합.
+        // 이름(사번)·분기 총휴무를 이 직원 블록 전체에 걸쳐 세로 병합.
         const blockEnd = ws.rowCount;
-        ws.getCell(blockStart, 1).value = emp.employee_number ?? "";
-        ws.getCell(blockStart, 2).value = emp.staff_name;
+        ws.getCell(blockStart, 1).value = emp.employee_number
+          ? `${emp.staff_name}(${emp.employee_number})`
+          : emp.staff_name;
         // 분기 목표(QUARTER_TARGET=24)와 비교하는 값. 분기휴무 검증 화면과 같은 공식.
-        ws.getCell(blockStart, 3).value = quarterTotal;
-        for (let col = 1; col <= 3; col++) {
+        ws.getCell(blockStart, 2).value = quarterTotal;
+        for (let col = 1; col <= 2; col++) {
           ws.mergeCells(blockStart, col, blockEnd, col);
           ws.getCell(blockStart, col).alignment = {
             vertical: "middle",
-            horizontal: col === 2 ? "left" : "center",
+            horizontal: col === 1 ? "left" : "center",
           };
         }
       }
@@ -1183,6 +1179,11 @@ export function AdminCalendar() {
         </p>
       )}
 
+      <div className="flex flex-wrap gap-2 px-3 pb-2 text-xs" aria-label="신청 색상 안내">
+        <span className="rounded bg-green-100 px-2 py-1 text-green-700 dark:bg-green-900/50 dark:text-green-300">기관사 신청</span>
+        <span className="rounded bg-blue-100 px-2 py-1 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">차장 신청</span>
+        <span className="rounded bg-orange-100 px-2 py-1 text-orange-800 dark:bg-orange-900/50 dark:text-orange-200">관리자 등록 지근</span>
+      </div>
       {viewStaff ? (
         <AdminEmployeeCalendarView
           staff={viewStaff}
@@ -1237,14 +1238,11 @@ export function AdminCalendar() {
                 {entries.map((e) => (
                   <span
                     key={e.id}
-                    title={`${e.staff_name} (${e.staff_position}) ${e.record_type}`}
+                    title={`${e.staff_name} (${e.staff_position}) ${e.record_type}${e.request_source === "admin" ? " · 관리자 등록" : ""}`}
+                    aria-label={`${e.staff_name} ${e.record_type}${e.request_source === "admin" ? " 관리자 등록" : ""}`}
                     className={cn(
                       "text-[9px] font-bold rounded px-1 truncate",
-                      e.record_type === "지휴"
-                        ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
-                        : e.staff_position === "차장"
-                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
-                          : "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                      getRequestBadgeClass(e)
                     )}
                   >
                     {e.staff_name}

@@ -31,6 +31,8 @@ export interface Employee {
   device_id: string | null;
 }
 
+export type RequestSource = "user" | "admin";
+
 export interface SpecialSchedule {
   id: string;
   staff_id: number;
@@ -39,6 +41,8 @@ export interface SpecialSchedule {
   lottery_status?: LotteryStatus | null;
   lottery_at?: string | null;
   created_at?: string;
+  // 최초 등록 출처. 기존 기록·마이그레이션 미적용 DB는 미상이다.
+  request_source?: RequestSource | null;
 }
 
 // 관리자 대시보드에서 coworker_list 와 join 한 결과

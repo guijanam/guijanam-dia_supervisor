@@ -129,9 +129,8 @@ export function QuarterBalance() {
     const sheetData = mismatched.map((r) => {
       const t = total(r);
       return {
-        사번: r.employee_number ?? "",
         직책: r.staff_position,
-        이름: r.staff_name,
+        이름: r.employee_number ? `${r.staff_name}(${r.employee_number})` : r.staff_name,
         휴무: r.hueCount,
         운휴: r.weekendTurnCount,
         지휴: r.jihyuCount,
