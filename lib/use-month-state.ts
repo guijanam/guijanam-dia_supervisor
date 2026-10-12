@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useCallback, useSyncExternalStore } from "react";
+import { useState, useCallback, useEffect, useSyncExternalStore } from "react";
 import { getTodayMonthStr } from "./schedule-utils";
+import { supabase } from "./supabase";
+import { QUARTERS } from "./quarter";
 
 // 선택한 달(yyyy-MM)을 sessionStorage 에 유지하는 훅.
 //
@@ -15,7 +17,7 @@ import { getTodayMonthStr } from "./schedule-utils";
 // - localStorage: 탭을 닫았다 며칠 뒤 다시 열어도 옛 달이 남아 혼란스럽다.
 //   "지난달 신청 화면인 줄 모르고 신청" 같은 사고로 이어질 수 있다.
 // - sessionStorage: 탭이 살아있는 동안만 유지된다. 새로고침·복원에는 살아남고,
-//   탭을 닫으면 깨끗이 사라져 다음에 열면 현재 달로 시작한다. 이 화면들의
+//   탭을 닫으면 깨끗이 사라져 다음에 열면 기본 달로 시작한다. 이 화면들의
 //   성격(그때그때 특정 달을 들여다봄)에 맞다.
 //
 // [왜 URL 쿼리가 아닌가]
@@ -37,13 +39,13 @@ export type MonthScope =
   | "admin-calendar"
   | "requests-panel";
 
-function storageKey(scope: MonthScope): string {
-  return `dia_month_${scope}`;
+function storageKey(scope: MonthScope, quarterMonth: string | null): string {
+  return `dia_month_${scope}${quarterMonth ? `_${quarterMonth}` : ""}`;
 }
 
-function readSaved(scope: MonthScope): string | null {
+function readSaved(key: string): string | null {
   try {
-    const saved = sessionStorage.getItem(storageKey(scope));
+    const saved = sessionStorage.getItem(key);
     return saved && MONTH_PATTERN.test(saved) ? saved : null;
   } catch {
     // 사파리 프라이빗 모드 등에서 sessionStorage 접근이 막힐 수 있다.
@@ -54,8 +56,7 @@ function readSaved(scope: MonthScope): string | null {
 
 // 서버 렌더와 클라이언트 첫 렌더의 HTML 이 어긋나면 hydration 오류가 난다.
 // useSyncExternalStore 로 "서버에서는 false, 마운트 후 true" 를 만들어
-// 저장값은 마운트 이후에만 쓴다. effect 안에서 setState 하는 방식과 달리
-// 렌더가 한 번 더 돌지 않아 현재 달이 깜빡였다 바뀌는 일이 없다.
+// 저장값은 마운트 이후에만 쓴다. 대상 분기는 별도 비동기 조회 후 반영한다.
 const emptySubscribe = () => () => {};
 function useIsMounted(): boolean {
   return useSyncExternalStore(
@@ -70,24 +71,52 @@ export function useMonthState(
 ): [string, (next: string) => void] {
   const isMounted = useIsMounted();
 
-  // 초기화 함수는 첫 렌더에서 한 번만 실행된다. 서버에서는 sessionStorage 가
-  // 없으므로 readSaved 가 null 을 돌려주고 현재 달로 시작한다.
-  const [monthValue, setMonthValue] = useState(
-    () => readSaved(scope) ?? getTodayMonthStr()
-  );
+  const [quarterMonth, setQuarterMonth] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ key: string; month: string } | null>(null);
+
+  useEffect(() => {
+    if (scope !== "admin-calendar" && scope !== "user-calendar") return;
+    let cancelled = false;
+    // 대상 분기는 추가 신청 마감일 유무와 관계없이 달력의 기본 달로 사용한다.
+    async function loadQuarter() {
+      try {
+        const { data, error } = await supabase
+          .from("app_settings")
+          .select("extra_request_year, extra_request_quarter")
+          .eq("id", 1)
+          .maybeSingle();
+        if (cancelled || error) return;
+        const year = data?.extra_request_year;
+        const quarter = QUARTERS.find((q) => q.value === data?.extra_request_quarter);
+        if (Number.isInteger(year) && year >= 1000 && year <= 9999 && quarter) {
+          setQuarterMonth(`${year}-${String(quarter.startMonth).padStart(2, "0")}`);
+        }
+      } catch {
+        // 설정 미지정·조회 실패 시 기존처럼 현재 달/저장된 달로 동작한다.
+      }
+    }
+    void loadQuarter();
+    return () => { cancelled = true; };
+  }, [scope]);
+
+  // 분기별로 저장값을 나누어 예전 분기의 선택 월이 새 분기를 가리지 않게 한다.
+  const key = storageKey(scope, quarterMonth);
+  const monthValue = selection?.key === key
+    ? selection.month
+    : readSaved(key) ?? quarterMonth ?? getTodayMonthStr();
 
   const setMonth = useCallback(
     (next: string) => {
-      setMonthValue(next);
+      setSelection({ key, month: next });
       try {
         if (MONTH_PATTERN.test(next)) {
-          sessionStorage.setItem(storageKey(scope), next);
+          sessionStorage.setItem(key, next);
         }
       } catch {
         // 위와 같음 — 저장 실패해도 화면 동작에는 영향이 없다.
       }
     },
-    [scope]
+    [key]
   );
 
   // 마운트 전(서버 HTML 과 맞춰야 하는 첫 렌더)에는 항상 현재 달을 보여주고,
