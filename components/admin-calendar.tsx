@@ -23,6 +23,8 @@ import {
   parseTurnsText,
   parseHolidayTurnRulesText,
   parseExcelFillColorsText,
+  getJigeunKind,
+  getJigeunBadgeLabel,
 } from "@/lib/types";
 import {
   getCalendarGrid,
@@ -42,7 +44,8 @@ import {
   buildEmployeeMonthCells,
   monthRestTotal,
 } from "@/lib/schedule-excel";
-import type { MonthMaps } from "@/lib/schedule-excel";
+import type { ExcelTurnVisibility, MonthMaps } from "@/lib/schedule-excel";
+import { ExcelExportDialog } from "@/components/excel-export-dialog";
 import { quarterEndOf, quarterMonths } from "@/lib/quarter";
 import {
   POSITIONS,
@@ -141,6 +144,8 @@ export function AdminCalendar() {
   const [addError, setAddError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
   const [quarterExportBusy, setQuarterExportBusy] = useState(false);
+  const [exportTarget, setExportTarget] = useState<"month" | "quarter" | null>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement | null>(null);
   // 월 일괄 추첨 — 미리보기 모달 / 실행 중 / 완료 요약
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -650,7 +655,7 @@ export function AdminCalendar() {
 
   // 월간 근무표 엑셀: 직책별 시트, 행=직원, 열=해당 월 날짜.
   // 셀 텍스트·집계 규칙은 lib/schedule-excel 에서 분기 엑셀과 공유한다.
-  const exportExcel = async () => {
+  const exportExcel = async (visibility?: ExcelTurnVisibility) => {
     const [maps, employees] = await Promise.all([
       buildMonthMaps(monthValue, holidayTurnRules),
       fetchExportEmployees(),
@@ -688,6 +693,7 @@ export function AdminCalendar() {
           maps,
           jigeunTurns,
           weekendHolidayTurns,
+          visibility,
         });
 
         const row = ws.addRow([
@@ -735,7 +741,8 @@ export function AdminCalendar() {
   // 덕분에 근무표 시트와 명단이 자동으로 일치한다.
   const buildRequestRoster = (
     maps: MonthMaps,
-    employees: Array<{ staff_id: number; staff_name: string }>
+    employees: Array<{ staff_id: number; staff_name: string }>,
+    visibility: ExcelTurnVisibility = {}
   ) => {
     const roster = new Map<string, { 지근: string[]; 지휴: string[] }>();
     for (const emp of employees) {
@@ -750,9 +757,18 @@ export function AdminCalendar() {
           maps.regularByStaff,
           maps.displayByStaff
         );
-        const turn = display
+        const displayTurn = maps.displayByStaff.get(key) ?? "";
+        const kind = getJigeunKind(displayTurn, jigeunTurns);
+        const hideDesignatedTurn = kind === "day"
+          ? visibility.hideDayTurn
+          : kind === "night" && visibility.hideNightTurn;
+        const turn = hideDesignatedTurn && kind
+          ? getJigeunBadgeLabel(kind, displayTurn)
+          : display
           ? display.substituted
-            ? `${display.original}→${display.substituted}`
+            ? visibility.hideOriginalHolidayTurn
+              ? display.substituted
+              : `${display.original}→${display.substituted}`
             : display.original
           : "";
         let slot = roster.get(date);
@@ -774,7 +790,7 @@ export function AdminCalendar() {
   //
   // 뒤이어 직책별 '신청현황' 시트를 붙인다 — 근무표는 직원별로 세로로 훑어야
   // "이 날 누가 지근인지" 를 알 수 있어서, 날짜를 열로 세운 뷰를 따로 둔다.
-  const exportQuarterExcel = async () => {
+  const exportQuarterExcel = async (visibility?: ExcelTurnVisibility) => {
     if (!quarterInfo) return;
     const { year, quarter } = quarterInfo;
 
@@ -826,6 +842,7 @@ export function AdminCalendar() {
             maps,
             jigeunTurns,
             weekendHolidayTurns,
+            visibility,
           });
           quarterTotal += monthRestTotal(totals);
 
@@ -901,7 +918,7 @@ export function AdminCalendar() {
       headerRow.alignment = { horizontal: "center" };
 
       monthMaps.forEach((maps, mi) => {
-        const roster = buildRequestRoster(maps, posEmployees);
+        const roster = buildRequestRoster(maps, posEmployees, visibility);
         const monthLabel = `${Number(monthValues[mi].slice(5, 7))}월`;
         const blockStart = ws.rowCount + 1;
 
@@ -966,6 +983,24 @@ export function AdminCalendar() {
 
   return (
     <div className="flex flex-col min-h-dvh">
+      {exportTarget && (
+        <ExcelExportDialog
+          title={exportTarget === "month" ? `${monthValue} 월간 근무표` : `${quarterInfo?.year}년 ${quarterInfo?.quarter}분기 근무표`}
+          onClose={() => setExportTarget(null)}
+          returnFocus={() => exportTriggerRef.current?.focus()}
+          onDownload={async (visibility) => {
+            const setBusy = exportTarget === "month" ? setExportBusy : setQuarterExportBusy;
+            setBusy(true);
+            setError(null);
+            try {
+              if (exportTarget === "month") await exportExcel(visibility);
+              else await exportQuarterExcel(visibility);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      )}
       <header className="flex items-center justify-between p-3 border-b">
         <div className="flex items-center gap-2">
           <div className="text-sm">
@@ -997,16 +1032,11 @@ export function AdminCalendar() {
         <Button
           size="sm"
           variant="outline"
-          disabled={exportBusy}
+          disabled={exportBusy || quarterExportBusy || isLoading}
           title="월간 근무표 엑셀 다운로드"
-          onClick={() => {
-            setExportBusy(true);
-            setError(null);
-            exportExcel()
-              .catch((err) =>
-                setError(err instanceof Error ? err.message : "엑셀 생성 실패")
-              )
-              .finally(() => setExportBusy(false));
+          onClick={(event) => {
+            exportTriggerRef.current = event.currentTarget;
+            setExportTarget("month");
           }}
         >
           {exportBusy ? (
@@ -1020,18 +1050,11 @@ export function AdminCalendar() {
           <Button
             size="sm"
             variant="outline"
-            disabled={quarterExportBusy}
+            disabled={exportBusy || quarterExportBusy || isLoading}
             title={`${quarterInfo.year}년 ${quarterInfo.quarter}분기 근무표 엑셀 다운로드`}
-            onClick={() => {
-              setQuarterExportBusy(true);
-              setError(null);
-              exportQuarterExcel()
-                .catch((err) =>
-                  setError(
-                    err instanceof Error ? err.message : "분기 엑셀 생성 실패"
-                  )
-                )
-                .finally(() => setQuarterExportBusy(false));
+            onClick={(event) => {
+              exportTriggerRef.current = event.currentTarget;
+              setExportTarget("quarter");
             }}
           >
             {quarterExportBusy ? (

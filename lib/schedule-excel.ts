@@ -32,6 +32,13 @@ export interface ExcelCell {
   special: RecordType | null;
 }
 
+/** 다운로드별 표시 선택. 근무 판정·집계·배경색은 변경하지 않는다. */
+export interface ExcelTurnVisibility {
+  hideDayTurn?: boolean;
+  hideNightTurn?: boolean;
+  hideOriginalHolidayTurn?: boolean;
+}
+
 /** 한 직원 · 한 달의 휴무 집계 원재료. */
 export interface MonthTotals {
   hueCount: number;
@@ -153,8 +160,9 @@ export function buildEmployeeMonthCells(args: {
   maps: MonthMaps;
   jigeunTurns: JigeunTurnSettings;
   weekendHolidayTurns: string[];
+  visibility?: ExcelTurnVisibility;
 }): { cells: ExcelCell[]; totals: MonthTotals } {
-  const { staffId, maps, jigeunTurns, weekendHolidayTurns } = args;
+  const { staffId, maps, jigeunTurns, weekendHolidayTurns, visibility = {} } = args;
   const { dates, regularByStaff, displayByStaff, specialByStaff, holidaySet } =
     maps;
 
@@ -191,15 +199,24 @@ export function buildEmployeeMonthCells(args: {
     // 운휴대기 치환 칸은 원래근무(윗줄)/대치근무(아랫줄) 두 줄로 적는다.
     const substituted =
       getTurnDisplay(key, regularByStaff, displayByStaff)?.substituted ?? null;
-    const turnText = substituted ? `${rawTurn}\n${substituted}` : turn;
+
     // 지정근무면 근무번호 뒤에 지(주)/지(야)를 덧붙인다. 신청(지근/지휴)이
     // 있는 날은 그 신청 구분을 우선 표시한다.
     const kind = turn ? getJigeunKind(turn, jigeunTurns) : null;
+    const hideDesignatedTurn = kind === "day"
+      ? visibility.hideDayTurn
+      : kind === "night" && visibility.hideNightTurn;
+    // '안보임'은 원래 번호만 숨긴다. 지정근무 배지·대치근무·신청은 남긴다.
+    const turnText = hideDesignatedTurn
+      ? ""
+      : substituted
+        ? visibility.hideOriginalHolidayTurn ? substituted : `${rawTurn}\n${substituted}`
+        : turn;
     // 지휴 신청 칸은 운휴대기와 같은 방식으로 원래근무(윗줄)/지휴(아랫줄)
     // 두 줄로 적는다. 지근은 기존처럼 한 줄로 병기한다(예: 58(지근)).
     const text = !special
       ? kind
-        ? `${turnText} ${getJigeunBadgeLabel(kind, turn)}`
+        ? `${turnText ? `${turnText} ` : ""}${getJigeunBadgeLabel(kind, turn)}`
         : turnText
       : special === "지휴"
         ? turnText
