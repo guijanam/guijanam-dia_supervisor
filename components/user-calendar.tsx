@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchScheduleByRange } from "@/lib/fetch-schedule";
 import { useAuth } from "@/lib/auth-context";
@@ -105,6 +105,8 @@ export function UserCalendar() {
     DEFAULT_HOLIDAY_TURN_RULES
   );
   const [isLoading, setIsLoading] = useState(false);
+  // 최초 진입의 대상 월 변경·직원 갱신·재조회가 겹쳐도 최신 결과만 반영한다.
+  const fetchState = useRef({ sequence: 0 });
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [extraDeadline, setExtraDeadline] = useState<string | null>(null);
@@ -257,6 +259,9 @@ export function UserCalendar() {
 
   const fetchData = useCallback(async () => {
     if (!employee) return;
+    const state = fetchState.current;
+    const sequence = ++state.sequence;
+    const isCurrent = () => sequence === state.sequence;
     setIsLoading(true);
     setError(null);
 
@@ -294,6 +299,7 @@ export function UserCalendar() {
             .maybeSingle(),
         ]);
 
+      if (!isCurrent()) return;
       if (specialResult.error) throw specialResult.error;
 
       const settings = settingsResult.data as {
@@ -421,6 +427,7 @@ export function UserCalendar() {
           .from("coworker_list")
           .select("staff_id, staff_name, staff_position")
           .in("staff_id", ids);
+        if (!isCurrent()) return;
         if (eErr) throw eErr;
         for (const e of emps ?? []) {
           empMap.set(e.staff_id, {
@@ -458,14 +465,21 @@ export function UserCalendar() {
 
       setHolidays(holidaySet);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "데이터 로딩 실패");
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "데이터 로딩 실패");
+      }
     } finally {
-      setIsLoading(false);
+      if (isCurrent()) setIsLoading(false);
     }
   }, [employee, monthValue]);
 
   useEffect(() => {
-    fetchData();
+    const state = fetchState.current;
+    void fetchData();
+    return () => {
+      // 월·직원 변경 및 언마운트 시 진행 중인 이전 요청을 무효화한다.
+      state.sequence++;
+    };
   }, [fetchData]);
 
   const shiftMonth = (delta: number) => {
