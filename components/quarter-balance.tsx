@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
@@ -44,6 +44,39 @@ export function QuarterBalance() {
   const [quarter, setQuarter] = useState(
     Math.floor(now.getMonth() / 3) + 1
   );
+  const [defaultsLoading, setDefaultsLoading] = useState(true);
+  const years = [...new Set([
+    ...Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i),
+    year,
+  ])].sort((a, b) => a - b);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("app_settings")
+          .select("extra_request_year, extra_request_quarter")
+          .eq("id", 1)
+          .maybeSingle();
+        if (!active || error) return;
+        const settingsYear = data?.extra_request_year;
+        const settingsQuarter = data?.extra_request_quarter;
+        if (
+          Number.isInteger(settingsYear) && settingsYear > 0 &&
+          Number.isInteger(settingsQuarter) && settingsQuarter >= 1 && settingsQuarter <= 4
+        ) {
+          setYear(settingsYear);
+          setQuarter(settingsQuarter);
+        }
+      } catch {
+        // 미설정·조회 실패 시 현재 년도/분기를 기본값으로 유지한다.
+      } finally {
+        if (active) setDefaultsLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
   const [position, setPosition] = useState<Position>("기관사");
   const [rows, setRows] = useState<StaffRow[]>([]);
   const [hasFetched, setHasFetched] = useState(false);
@@ -189,11 +222,13 @@ export function QuarterBalance() {
 
       <div className="flex items-center gap-2 p-3 flex-wrap">
         <select
+          aria-label="년도"
+          disabled={defaultsLoading}
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
           className="h-9 rounded-md border bg-background px-2 text-sm"
         >
-          {Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i).map(
+          {years.map(
             (y) => (
               <option key={y} value={y}>
                 {y}년
@@ -202,6 +237,8 @@ export function QuarterBalance() {
           )}
         </select>
         <select
+          aria-label="분기"
+          disabled={defaultsLoading}
           value={quarter}
           onChange={(e) => setQuarter(Number(e.target.value))}
           className="h-9 rounded-md border bg-background px-2 text-sm"
@@ -212,7 +249,7 @@ export function QuarterBalance() {
             </option>
           ))}
         </select>
-        <Button size="sm" onClick={fetchData} disabled={isLoading}>
+        <Button size="sm" onClick={fetchData} disabled={isLoading || defaultsLoading}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "조회"}
         </Button>
         <Button
