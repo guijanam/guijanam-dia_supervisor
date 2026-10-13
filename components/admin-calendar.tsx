@@ -1021,66 +1021,72 @@ export function AdminCalendar() {
         </div>
       </header>
 
-      <div className="flex items-center justify-center gap-4 py-3">
-        <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(-1)}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="font-bold text-lg tabular-nums">{monthValue}</span>
-        <Button variant="ghost" size="icon-sm" onClick={() => shiftMonth(1)}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={exportBusy || quarterExportBusy || isLoading}
-          title="월간 근무표 엑셀 다운로드"
-          onClick={(event) => {
-            exportTriggerRef.current = event.currentTarget;
-            setExportTarget("month");
-          }}
-        >
-          {exportBusy ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
-          Excel
-        </Button>
-        {quarterInfo && (
+      <div className="flex min-w-0 flex-col gap-2 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center sm:gap-4">
+        <div className="flex shrink-0 items-center justify-center gap-1">
+          <Button variant="ghost" size="icon-sm" className="size-[44px]" aria-label="이전 달" onClick={() => shiftMonth(-1)}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="shrink-0 whitespace-nowrap font-bold text-lg tabular-nums">{monthValue}</span>
+          <Button variant="ghost" size="icon-sm" className="size-[44px]" aria-label="다음 달" onClick={() => shiftMonth(1)}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
           <Button
             size="sm"
             variant="outline"
             disabled={exportBusy || quarterExportBusy || isLoading}
-            title={`${quarterInfo.year}년 ${quarterInfo.quarter}분기 근무표 엑셀 다운로드`}
+            title="월간 근무표 엑셀 다운로드"
+            className="gap-1 has-[>svg]:px-2"
             onClick={(event) => {
               exportTriggerRef.current = event.currentTarget;
-              setExportTarget("quarter");
+              setExportTarget("month");
             }}
           >
-            {quarterExportBusy ? (
+            {exportBusy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Download className="h-4 w-4" />
             )}
-            분기 Excel
+            Excel
           </Button>
-        )}
-        {bulkTargets.length > 0 && (
-          <Button
-            size="sm"
-            variant="default"
-            title="이 달의 정원 초과 날짜를 한 번에 추첨"
-            onClick={() => {
-              setBulkResult(null);
-              setBulkOpen(true);
-            }}
-          >
-            <Shuffle className="h-4 w-4" />
-            일괄 추첨 ({bulkTargets.length})
-          </Button>
-        )}
+          {quarterInfo && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={exportBusy || quarterExportBusy || isLoading}
+              title={`${quarterInfo.year}년 ${quarterInfo.quarter}분기 근무표 엑셀 다운로드`}
+              className="gap-1 has-[>svg]:px-2"
+              onClick={(event) => {
+                exportTriggerRef.current = event.currentTarget;
+                setExportTarget("quarter");
+              }}
+            >
+              {quarterExportBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              분기 Excel
+            </Button>
+          )}
+          {bulkTargets.length > 0 && (
+            <Button
+              size="sm"
+              variant="default"
+              title="이 달의 정원 초과 날짜를 한 번에 추첨"
+              className="gap-1 has-[>svg]:px-2"
+              onClick={() => {
+                setBulkResult(null);
+                setBulkOpen(true);
+              }}
+            >
+              <Shuffle className="h-4 w-4" />
+              일괄 추첨 ({bulkTargets.length})
+            </Button>
+          )}
+        </div>
       </div>
-
       {bulkResult && (
         <div className="mx-3 mb-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400 flex items-center justify-between gap-2">
           <span>{bulkResult}</span>
