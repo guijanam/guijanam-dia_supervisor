@@ -62,6 +62,48 @@ function shortDateLabel(dateString: string): string {
   return `${Number(m)}/${Number(d)}(${getDayName(dateString)})`;
 }
 
+/**
+ * 폰 기본 문자 앱을 수신자·본문이 채워진 상태로 여는 sms: 링크.
+ * 본문 구분자가 OS마다 달라 iOS 는 '&body=', 그 외(안드로이드)는 '?body=' 를 쓴다.
+ * 여러 번호는 쉼표로 이으면 양쪽 모두 수신자 여러 명으로 열린다.
+ */
+function smsHref(numbers: string[], body: string): string {
+  const isIOS =
+    typeof navigator !== "undefined" &&
+    (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      // iPadOS 13+ 는 데스크톱 Safari 로 위장한다.
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  return `sms:${numbers.join(",")}${isIOS ? "&" : "?"}body=${encodeURIComponent(body)}`;
+}
+
+/** 'YYYY-MM-DD' → '11/20(목)' 형태의 마감 안내 문구. 마감이 없으면 null. */
+function deadlineLabel(deadline: string | null): string | null {
+  return deadline ? shortDateLabel(deadline) : null;
+}
+
+/** 개별 탈락자에게 보낼 안내 문자. 본인의 탈락 날짜를 넣는다. */
+function personalSmsBody(row: LoserRow, deadline: string | null): string {
+  const dates = row.dates.map((d) => shortDateLabel(d.target_date)).join(", ");
+  const until = deadlineLabel(deadline);
+  return (
+    `[지근 추첨 안내] ${row.staff_name}님, ${dates} 신청이 추첨에서 탈락했습니다.` +
+    (until
+      ? ` ${until}까지 자리가 남은 다른 날짜로 추가 신청하실 수 있습니다.`
+      : "")
+  );
+}
+
+/** 여러 명에게 한 번에 보낼 공통 안내 문자. 날짜는 사람마다 달라 넣지 않는다. */
+function groupSmsBody(deadline: string | null): string {
+  const until = deadlineLabel(deadline);
+  return (
+    "[지근 추첨 안내] 신청하신 지근이 추첨에서 탈락했습니다. 탈락 날짜는 문서함의 추첨 결과에서 확인하세요." +
+    (until
+      ? ` ${until}까지 자리가 남은 다른 날짜로 추가 신청하실 수 있습니다.`
+      : "")
+  );
+}
+
 export function LotteryLosersPanel() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -78,6 +120,12 @@ export function LotteryLosersPanel() {
   // 분기 전체 탈락 건 삭제(과거 분기 정리용) 확인창.
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeBusy, setPurgeBusy] = useState(false);
+  // 추가 신청 마감과 그 대상 분기. 조회 중인 분기가 대상일 때만 문자에 마감을 넣는다.
+  const [extraDeadline, setExtraDeadline] = useState<{
+    deadline: string;
+    year: number;
+    quarter: number;
+  } | null>(null);
 
   // 첫 화면이 빈 목록이 되지 않도록 기본 분기를 고른다.
   //
@@ -92,7 +140,7 @@ export function LotteryLosersPanel() {
         const [settings, lost] = await Promise.all([
           supabase
             .from("app_settings")
-            .select("extra_request_year, extra_request_quarter")
+            .select("extra_request_year, extra_request_quarter, extra_request_deadline")
             .eq("id", 1)
             .maybeSingle(),
           supabase
@@ -113,6 +161,14 @@ export function LotteryLosersPanel() {
 
         const settingsYear = settings.data?.extra_request_year ?? null;
         const settingsQuarter = settings.data?.extra_request_quarter ?? null;
+        const settingsDeadline = settings.data?.extra_request_deadline ?? null;
+        if (settingsYear && settingsQuarter && settingsDeadline) {
+          setExtraDeadline({
+            deadline: settingsDeadline,
+            year: settingsYear,
+            quarter: settingsQuarter,
+          });
+        }
 
         if (
           settingsYear &&
@@ -263,6 +319,20 @@ export function LotteryLosersPanel() {
     () => filtered.filter((r) => !r.phone_number).length,
     [filtered]
   );
+  const deadlineForQuarter =
+    extraDeadline &&
+    extraDeadline.year === year &&
+    extraDeadline.quarter === quarter
+      ? extraDeadline.deadline
+      : null;
+  const filteredDialables = useMemo(
+    () =>
+      filtered
+        .map((r) => r.phone_number)
+        .filter((p): p is string => !!p)
+        .map(toDialable),
+    [filtered]
+  );
   const totalLostEntries = useMemo(
     () => filtered.reduce((sum, r) => sum + r.dates.length, 0),
     [filtered]
@@ -286,10 +356,7 @@ export function LotteryLosersPanel() {
   };
 
   const copyAllPhones = () => {
-    const phones = filtered
-      .map((r) => r.phone_number)
-      .filter((p): p is string => !!p)
-      .map(toDialable);
+    const phones = filteredDialables;
     if (phones.length === 0) {
       setError("복사할 전화번호가 없습니다.");
       setDone(null);
@@ -451,6 +518,23 @@ export function LotteryLosersPanel() {
         >
           <Copy className="h-4 w-4" /> 전체 번호 복사
         </Button>
+        {/* 화면 필터가 걸린 목록 기준. 폰에서 누르면 문자 앱이 수신자 전원으로 열린다. */}
+        {filteredDialables.length > 0 ? (
+          <Button
+            asChild
+            size="sm"
+            variant="outline"
+            title="폰의 문자 앱이 탈락자 전원을 수신자로 열립니다. 단체 대화방으로 보내지면 서로의 번호가 보일 수 있습니다."
+          >
+            <a href={smsHref(filteredDialables, groupSmsBody(deadlineForQuarter))}>
+              <MessageSquare className="h-4 w-4" /> 전체 문자 ({filteredDialables.length}명)
+            </a>
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" disabled>
+            <MessageSquare className="h-4 w-4" /> 전체 문자
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -577,7 +661,12 @@ export function LotteryLosersPanel() {
                         variant="outline"
                         title={`${row.staff_name}님에게 문자`}
                       >
-                        <a href={`sms:${dialable}`}>
+                        <a
+                          href={smsHref(
+                            [dialable],
+                            personalSmsBody(row, deadlineForQuarter)
+                          )}
+                        >
                           <MessageSquare className="h-4 w-4" />
                         </a>
                       </Button>
